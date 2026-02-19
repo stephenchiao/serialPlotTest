@@ -128,7 +128,7 @@ int main(void)
 
 
 	        ZDT_Emm_SetSpeed(&motor1, motor1.target_speed);
-	          HAL_Delay(50); // 适当加长延时更稳定
+	          HAL_Delay(10); // 适当加长延时更稳定
   }
   /* USER CODE END 3 */
 }
@@ -180,7 +180,14 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 // CAN 接收中断回调 (必须放在这里)
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    CAN_RxHeaderTypeDef RxHeader;
+    uint8_t RxData[8];
 
+    // 强制读取邮箱里的数据并清空标志位（读出来什么都不做，直接扔掉）
+    HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData);
+}
 
 // 定时器中断回调 (10ms 一次)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
