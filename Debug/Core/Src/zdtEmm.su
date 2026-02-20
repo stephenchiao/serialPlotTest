@@ -1,3 +1,5 @@
 ../Core/Src/zdtEmm.c:12:6:ZDT_Emm_Init	16	static
-../Core/Src/zdtEmm.c:20:6:ZDT_Emm_SetSpeed	32	static
-../Core/Src/zdtEmm.c:49:6:ZDT_Emm_RxHandler	32	static
+../Core/Src/zdtEmm.c:21:6:ZDT_Emm_Enable	24	static
+../Core/Src/zdtEmm.c:34:6:ZDT_Emm_SetSpeed	32	static
+../Core/Src/zdtEmm.c:66:6:ZDT_Emm_ReadSpeed	24	static
+../Core/Src/zdtEmm.c:75:6:ZDT_Emm_RxHandler	40	static

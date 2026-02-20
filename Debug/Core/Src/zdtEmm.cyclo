@@ -1,3 +1,5 @@
 ../Core/Src/zdtEmm.c:12:6:ZDT_Emm_Init	1
-../Core/Src/zdtEmm.c:20:6:ZDT_Emm_SetSpeed	2
-../Core/Src/zdtEmm.c:49:6:ZDT_Emm_RxHandler	3
+../Core/Src/zdtEmm.c:21:6:ZDT_Emm_Enable	1
+../Core/Src/zdtEmm.c:34:6:ZDT_Emm_SetSpeed	3
+../Core/Src/zdtEmm.c:66:6:ZDT_Emm_ReadSpeed	1
+../Core/Src/zdtEmm.c:75:6:ZDT_Emm_RxHandler	11

@@ -107,7 +107,9 @@ int main(void)
 
     // 2. 初始化电机
     ZDT_Emm_Init(&motor1, 1); // ID = 1
-
+    // ✅ 先发送使能命令
+    ZDT_Emm_Enable(&motor1);
+    HAL_Delay(50);  // 等待使能响应
     // 3. 启动定时器中断 (用于 10ms 发送一次绘图数据)
     HAL_TIM_Base_Start_IT(&htim3);
   /* USER CODE END 2 */
@@ -182,18 +184,21 @@ void SystemClock_Config(void)
 // CAN 接收中断回调 (必须放在这里)
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-    CAN_RxHeaderTypeDef RxHeader;
-    uint8_t RxData[8];
-
-    // 强制读取邮箱里的数据并清空标志位（读出来什么都不做，直接扔掉）
-    HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData);
+	 ZDT_CAN_RxFIFO0_Handler(hcan);
 }
 
 // 定时器中断回调 (10ms 一次)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
+	static uint16_t read_speed_counter = 0;
   if (htim->Instance == TIM3) {
-    // 准备绘图数据
+	  // ✅ 每 100ms 读取一次速度（而不是每 10ms）
+    read_speed_counter++;
+	if (read_speed_counter >= 10) {
+	read_speed_counter = 0;
+	ZDT_Emm_ReadSpeed(&motor1);
+	   }
+	  // 准备绘图数据
     static float plot_data[2];
     plot_data[0] = motor1.target_speed; // 通道1：目标速度
     plot_data[1] = motor1.actual_speed; // 通道2：实际速度 (需电机反馈支持)
