@@ -181,7 +181,7 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-// CAN 接收中断回调 (必须放在这里)
+// CAN 接收中断回调 (必须放在这里)0000000
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
 	 ZDT_CAN_RxFIFO0_Handler(hcan);
