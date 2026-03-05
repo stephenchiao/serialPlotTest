@@ -7,116 +7,132 @@
 #include "zdtEmm.h"
 #include "zdtCan.h"
 
-ZDT_Motor_t motor1;
+ZDT_Motor_t motors[4];
 
-void ZDT_Emm_Init(ZDT_Motor_t *motor, uint8_t id) {
-    motor->node_id = id;
-    motor->target_speed = 0;
-    motor->actual_speed = 0;
-    motor->acc = 0; // 0=直接启动，建议测试用0
-    motor->dir = 0;
-    motor->enabled = 0;
-}
-// 【新增】发送使能命令 (0xF3)
-void ZDT_Emm_Enable(ZDT_Motor_t *motor) {
-    uint8_t tx_data[6];
-    tx_data[0] = 0xF3;  // 使能命令
-    tx_data[1] = 0xAB;
-    tx_data[2] = 0x01;  // 使能
-    tx_data[3] = 0x00;  // 不同步
-    tx_data[4] = 0x6B;  // 校验
-    tx_data[5] = 0x00;
+void ZDT_Emm_InitAll(void) {
+    // 初始化 4 个电机 ID: 1, 2, 3, 4
+	 motors[0].node_id = 1;  // ID 1 左后
+	    motors[0].target_speed = 0;
+	    motors[0].actual_speed = 0;
 
-    ZDT_CAN_Send_ExtId(motor->node_id << 8, tx_data, 5);
-    motor->enabled = 1;
+	    motors[1].node_id = 2;  // ID 2 左前
+	    motors[1].target_speed = 0;
+	    motors[1].actual_speed = 0;
+
+	    motors[2].node_id = 3;  // ID 3 右前
+	    motors[2].target_speed = 0;
+	    motors[2].actual_speed = 0;
+
+	    motors[3].node_id = 4;  // ID 4 右后
+	    motors[3].target_speed = 0;
+	    motors[3].actual_speed = 0;
 }
-// 发送速度命令 (0xF6)
-void ZDT_Emm_SetSpeed(ZDT_Motor_t *motor, float speed_rpm) {
-	// 如果没使能，先使能
-	    if (!motor->enabled) {
-	        ZDT_Emm_Enable(motor);
-	        return;  // 本次只发送使能，下次再发速度
-	    }
-	uint8_t tx_data[8];
+void ZDT_Emm_SetSpeedByID(uint8_t id, float speed_rpm) {
+    uint8_t tx_data[7];
     uint16_t vel_int;
+    uint8_t dir = (speed_rpm < 0) ? 1 : 0;
+    vel_int = (uint16_t)(speed_rpm < 0 ? -speed_rpm : speed_rpm);
 
-    motor->target_speed = speed_rpm;
+    // 依据：P51 5.3.7 速度模式控制（Emm）
+    tx_data[0] = 0xF6;                    // 功能码
+    tx_data[1] = dir;                     // 方向
+    tx_data[2] = (vel_int >> 8) & 0xFF;   // 速度高字节
+    tx_data[3] = vel_int & 0xFF;          // 速度低字节
+    tx_data[4] = 0;                       // 加速度
+    tx_data[5] = 0x00;                    // 同步标志
+    tx_data[6] = 0x6B;                    // 校验码，依据：P106 8.1
 
-    if (speed_rpm < 0) {
-        motor->dir = 1;
-        speed_rpm = -speed_rpm;
-    } else {
-        motor->dir = 0;
-    }
-
-    vel_int = (uint16_t)speed_rpm;
-
-    tx_data[0] = 0xF6; // 功能码
-    tx_data[1] = motor->dir;
-    tx_data[2] = (vel_int >> 8) & 0xFF;
-    tx_data[3] = vel_int & 0xFF;
-    tx_data[4] = motor->acc;
-    tx_data[5] = 0x00; // 同步
-    tx_data[6] = 0x6B; // 校验
-    tx_data[7] = 0x00;
-
-    // ZDT V5 协议 ID 格式: NodeID << 8
-    ZDT_CAN_Send_ExtId(motor->node_id << 8, tx_data, 7);
+    // 依据：P40 4.2.1 CAN 扩展帧 ID = (Addr << 8) | Packet
+    ZDT_CAN_Send_ExtId((id << 8) | 0, tx_data, 7);
 }
-void ZDT_Emm_ReadSpeed(ZDT_Motor_t *motor) {
+void ZDT_Emm_ReadSpeedByID(uint8_t id) {
     uint8_t tx_data[2];
-    tx_data[0] = 0x35; // 功能码：读取电机实时转速
-    tx_data[1] = 0x6B; // 校验
-
-    // 发送 2 字节 payload
-    ZDT_CAN_Send_ExtId(motor->node_id << 8, tx_data, 2);
+    tx_data[0] = 0x35;  // 功能码，依据：P67 5.5.11
+    tx_data[1] = 0x6B;  // 校验码
+    ZDT_CAN_Send_ExtId((id << 8) | 0, tx_data, 2);
 }
 // 解析电机反馈
+// ✅ 修改：接收回调支持所有电机
 void ZDT_Emm_RxHandler(uint32_t ExtId, uint8_t *Data, uint8_t Len) {
-    // ✅ 尝试两种 ID 解析方式（调试用）
-    uint8_t sender_id_high = (ExtId >> 8) & 0xFF;
-    uint8_t sender_id_low = ExtId & 0xFF;
-
-    // 优先匹配高字节（根据说明书）
-    if (sender_id_high != motor1.node_id) {
-        // 如果高字节不匹配，尝试低字节（某些固件版本可能不同）
-        if (sender_id_low != motor1.node_id) {
-            return;  // ID 不匹配，丢弃
-        }
-    }
-
+    uint8_t sender_id = (ExtId >> 8) & 0xFF;
     if (Len < 3) return;
 
-    uint8_t cmd = Data[0];
+    // ✅ 修复：功能码在 Data[0]，依据：P41 4.2.2
+    uint8_t func_code = Data[0];
 
-    // ✅ 根据功能码区分处理
-    if (cmd == 0x35) {
-        // --- 处理读取速度响应 (0x35) ---
-        // 说明书格式：地址 + 0x35 + 符号 + 速度 (2 字节) + 校验
-        if (Len >= 5) {
-            uint8_t sign = Data[1];
-            uint16_t speed_uint = (Data[2] << 8) | Data[3];
-            float real_speed = (float)speed_uint;
-
-            if (sign == 0x01) {
-                real_speed = -real_speed;
+    // 查找对应的电机结构体
+    for(int i=0; i<4; i++) {
+        if (motors[i].node_id == sender_id) {
+            if (func_code == 0x35 && Len >= 5) {  // 读取转速回复，依据：P67 5.5.11
+                uint8_t sign = Data[1];
+                uint16_t speed_uint = (Data[2] << 8) | Data[3];
+                float real_speed = (float)speed_uint;
+                if (sign == 0x01) real_speed = -real_speed;
+                motors[i].actual_speed = real_speed; // 更新实际速度用于里程计
             }
+            break;
+        }
+    }
+}
+void ZDT_Emm_EnableByID(uint8_t id) {
+    uint8_t tx_data[4];
+    // 依据：P48 5.3.2 电机使能控制 (假设协议：0xF3 + 使能位 + 状态位 + 校验)
+    // 注意：请根据你手里的 ZDT 驱动器手册核对具体字节含义
+    tx_data[0] = 0xF3; // 功能码
+    tx_data[1] = 0x01; // 使能
+    tx_data[2] = 0x00; // 0x00为使能，0x01为释放
+    tx_data[3] = 0x6B; // 校验码
 
-            motor1.actual_speed = real_speed;  // ✅ 更新速度
+    ZDT_CAN_Send_ExtId((id << 8) | 0, tx_data, 4);
+}
+
+
+//调试用
+void ZDT_Emm_SetSingleMotorSpeed(uint8_t id, float speed_rpm) {
+    uint8_t tx_data[7];
+    uint16_t vel_int;
+    uint8_t dir = (speed_rpm < 0) ? 1 : 0;
+    vel_int = (uint16_t)(speed_rpm < 0 ? -speed_rpm : speed_rpm);
+
+    tx_data[0] = 0xF6;                    // 功能码
+    tx_data[1] = dir;                     // 方向 00/01
+    tx_data[2] = (vel_int >> 8) & 0xFF;   // 速度高字节
+    tx_data[3] = vel_int & 0xFF;          // 速度低字节
+    tx_data[4] = 0;                       // 加速度 00-FF
+    tx_data[5] = 0x00;                    // 同步标志 00=立即执行
+    tx_data[6] = 0x6B;                    // 校验码，依据：P106 8.1
+
+    // 依据：P40 4.2.1 CAN 扩展帧 ID = (Addr << 8) | Packet
+    ZDT_CAN_Send_ExtId((id << 8) | 0, tx_data, 7);
+}
+
+// ✅ 新增：读取单个电机速度
+// 依据：P67 5.5.11 读取电机实时转速
+void ZDT_Emm_ReadSingleMotorSpeed(uint8_t id) {
+    uint8_t tx_data[2];
+    tx_data[0] = 0x35;  // 功能码
+    tx_data[1] = 0x6B;  // 校验码
+    ZDT_CAN_Send_ExtId((id << 8) | 0, tx_data, 2);
+}
+
+// ✅ 新增：使能/失能单个电机
+// 依据：P48 5.3.2 电机使能控制
+void ZDT_Emm_EnableSingleMotor(uint8_t id, uint8_t enable) {
+    uint8_t tx_data[5];
+    tx_data[0] = 0xF3;  // 功能码
+    tx_data[1] = 0xAB;  // 辅助码
+    tx_data[2] = enable ? 0x01 : 0x00;  // 使能状态 01=使能，00=失能
+    tx_data[3] = 0x00;  // 同步标志 00=立即执行
+    tx_data[4] = 0x6B;  // 校验码
+    ZDT_CAN_Send_ExtId((id << 8) | 0, tx_data, 5);
+}
+
+// ✅ 新增：获取单个电机实际速度（从 motors 数组读取）
+float ZDT_Emm_GetSingleMotorSpeed(uint8_t id) {
+    for(int i=0; i<4; i++) {
+        if (motors[i].node_id == id) {
+            return motors[i].actual_speed;
         }
     }
-    else if (cmd == 0xF6) {
-        // --- 处理速度控制应答 (0xF6) ---
-        // Data[1] = 命令状态 (0x02=成功，0xE2=失败)
-        if (Data[1] == 0xE2) {
-            // 失败，可能是没使能
-            motor1.enabled = 0;
-        }
-    }
-    else if (cmd == 0xF3) {
-        // --- 处理使能应答 (0xF3) ---
-        if (Data[1] == 0x02) {
-            motor1.enabled = 1;  // ✅ 使能成功
-        }
-    }
+    return 0.0f;
 }

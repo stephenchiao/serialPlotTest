@@ -52,18 +52,89 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-float debug_wave = 0.0f;
+#define WHEEL_DIAMETER  0.075f      // 轮子直径 100mm (需根据实际修改)
+#define ROBOT_W         0.229f      // 轮距 (左右轮距离)
+#define ROBOT_H         0.255f      // 轴距 (前后轮距离)
+#define TARGET_DIST     2.0f       // 目标移动距离 2 米
+#define MOVE_SPEED      0.3f       // 移动速度 0.3 m/s
+
+extern ZDT_Motor_t motors[4];
+// 里程计变量
+float current_distance = 0.0f;
+float last_distance = 0.0f;
+uint32_t last_odom_tick = 0;
+uint8_t move_state = 0; // 0:向前，1:停，2:向后，3:停
+
+// 4个电机速度缓存
+float motor_speeds[4] = {0};  // 0:ID1左后，1:ID2左前，2:ID3右前，3:ID4右后
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+// ✅ 添加函数声明（解决隐式声明警告）
+void Mecanum_Kinematics(float Vx, float Vy, float Vz, float *V_bl, float *V_fl, float *V_fr, float *V_br);
+float MsToRpm(float v_ms);
+void SetAllMotorsSpeed(float V_bl, float V_fl, float V_fr, float V_br);
+void ReadAllMotorsSpeed(void);
+void StopAllMotors(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void Mecanum_Kinematics(float Vx, float Vy, float Vz, float *V_bl, float *V_fl, float *V_fr, float *V_br) {
+    float L = (ROBOT_H / 2.0f) + (ROBOT_W / 2.0f);
+    // 依据用户提供的公式
+    *V_bl = Vx + Vy - Vz * L;  // ID 1 左后
+    *V_fl = Vx - Vy - Vz * L;  // ID 2 左前
+    *V_fr = -(Vx + Vy + Vz * L);  // ID 3 右前
+    *V_br = -(Vx - Vy + Vz * L);  // ID 4 右后
+}
 
+// ✅ 线速度转 RPM 函数
+float MsToRpm(float v_ms) {
+    if (WHEEL_DIAMETER <= 0) return 0;
+    // V = RPM * π * D / 60  =>  RPM = V * 60 / (π * D)
+    return v_ms * 60.0f / (3.1415926f * WHEEL_DIAMETER);
+}
+
+// ✅ 设置 4 个轮子速度
+void SetAllMotorsSpeed(float V_bl, float V_fl, float V_fr, float V_br) {
+    ZDT_Emm_SetSpeedByID(1, MsToRpm(V_bl));  // ID 1: 左后
+    ZDT_Emm_SetSpeedByID(2, MsToRpm(V_fl));  // ID 2: 左前
+    ZDT_Emm_SetSpeedByID(3, MsToRpm(V_fr));  // ID 3: 右前
+    ZDT_Emm_SetSpeedByID(4, MsToRpm(V_br));  // ID 4: 右后
+}
+
+// ✅ 读取 4 个轮子速度 (用于里程计)
+void ReadAllMotorsSpeed(void) {
+    ZDT_Emm_ReadSpeedByID(1);
+    ZDT_Emm_ReadSpeedByID(2);
+    ZDT_Emm_ReadSpeedByID(3);
+    ZDT_Emm_ReadSpeedByID(4);
+}
+
+// ✅ 计算里程计（速度积分）
+void UpdateOdometry(void) {
+    // 计算4轮平均线速度 (m/s)
+    float avg_rpm = (motors[0].actual_speed + motors[1].actual_speed +
+                     motors[2].actual_speed + motors[3].actual_speed) / 4.0f;
+    float avg_ms = avg_rpm * 3.1415926f * WHEEL_DIAMETER / 60.0f;
+
+    // 计算时间间隔 (秒)
+    uint32_t current_tick = HAL_GetTick();
+    float dt = (current_tick - last_odom_tick) / 1000.0f;
+    last_odom_tick = current_tick;
+
+    // 速度积分计算距离
+    float delta_dist = avg_ms * dt;
+    current_distance += delta_dist;
+}
+
+// ✅ 停止所有电机
+void StopAllMotors(void) {
+    SetAllMotorsSpeed(0, 0, 0, 0);
+}
 /* USER CODE END 0 */
 
 /**
@@ -100,18 +171,32 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  // 1. 初始化 CAN 和 过滤器
-    ZDT_CAN_ConfigFilter();
-    // 注册电机的解析函数到 CAN 接收层
-    ZDT_CAN_RegisterCallback(ZDT_Emm_RxHandler);
+  // 1. 初始化 CAN 和过滤器
+  ZDT_CAN_ConfigFilter();
 
-    // 2. 初始化电机
-    ZDT_Emm_Init(&motor1, 1); // ID = 1
-    // ✅ 先发送使能命令
-    ZDT_Emm_Enable(&motor1);
-    HAL_Delay(50);  // 等待使能响应
-    // 3. 启动定时器中断 (用于 10ms 发送一次绘图数据)
-    HAL_TIM_Base_Start_IT(&htim3);
+  // 2. 注册回调
+  ZDT_CAN_RegisterCallback(ZDT_Emm_RxHandler);
+
+  // 3. 初始化 4 个电机
+  ZDT_Emm_InitAll();
+
+  // 4. 使能所有电机（必须使能才能响应速度命令）
+  // 依据：P48 5.3.2 电机使能控制
+  HAL_Delay(100);
+  ZDT_Emm_EnableByID(1);
+  HAL_Delay(10);
+  ZDT_Emm_EnableByID(2);
+  HAL_Delay(10);
+  ZDT_Emm_EnableByID(3);
+  HAL_Delay(10);
+  ZDT_Emm_EnableByID(4);
+  HAL_Delay(100);  // 等待使能完成
+
+  // 5. 启动定时器（用于定时读取速度）
+  HAL_TIM_Base_Start_IT(&htim3);
+
+  // 6. 初始化里程计计时器
+  last_odom_tick = HAL_GetTick();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -121,16 +206,12 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-//	  // 简单的测试逻辑：让电机以 300 RPM 转动
-//	      ZDT_Emm_SetSpeed(&motor1, 300.0f);
-//	      HAL_Delay(100);
-	  // --- 纯测试代码 ---
-	  debug_wave += 0.05f;
-	        motor1.target_speed = sin(debug_wave) * 500.0f;
+	  float V1, V2, V3, V4;
+	     Mecanum_Kinematics(MOVE_SPEED, 0, 0, &V1, &V2, &V3, &V4);
+	     SetAllMotorsSpeed(V1, V2, V3, V4);
 
-
-	        ZDT_Emm_SetSpeed(&motor1, motor1.target_speed);
-	          HAL_Delay(10); // 适当加长延时更稳定
+	     // 小延时，避免CPU占用过高
+	     HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }
@@ -181,31 +262,19 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-// CAN 接收中断回调 (必须放在这里)0000000
+// CAN 接收中断回调
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-	 ZDT_CAN_RxFIFO0_Handler(hcan);
+    ZDT_CAN_RxFIFO0_Handler(hcan);
 }
 
 // 定时器中断回调 (10ms 一次)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	static uint16_t read_speed_counter = 0;
-  if (htim->Instance == TIM3) {
-	  // ✅ 每 100ms 读取一次速度（而不是每 10ms）
-    read_speed_counter++;
-	if (read_speed_counter >= 10) {
-	read_speed_counter = 0;
-	ZDT_Emm_ReadSpeed(&motor1);
-	   }
-	  // 准备绘图数据
-    static float plot_data[2];
-    plot_data[0] = motor1.target_speed; // 通道1：目标速度
-    plot_data[1] = motor1.actual_speed; // 通道2：实际速度 (需电机反馈支持)
-
-    // 发送到上位机
-    SerialPlot_SendFloats(plot_data, 2);
-  }
+    if (htim->Instance == TIM3) {
+        // 如果需要绘图，可以在这里置标志位
+        // flag_plot_10ms = 1;
+    }
 }
 /* USER CODE END 4 */
 

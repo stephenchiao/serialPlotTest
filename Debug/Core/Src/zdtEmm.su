@@ -1,5 +1,9 @@
-../Core/Src/zdtEmm.c:12:6:ZDT_Emm_Init	16	static
-../Core/Src/zdtEmm.c:21:6:ZDT_Emm_Enable	24	static
-../Core/Src/zdtEmm.c:34:6:ZDT_Emm_SetSpeed	32	static
-../Core/Src/zdtEmm.c:66:6:ZDT_Emm_ReadSpeed	24	static
-../Core/Src/zdtEmm.c:75:6:ZDT_Emm_RxHandler	40	static
+../Core/Src/zdtEmm.c:12:6:ZDT_Emm_InitAll	4	static
+../Core/Src/zdtEmm.c:30:6:ZDT_Emm_SetSpeedByID	32	static
+../Core/Src/zdtEmm.c:48:6:ZDT_Emm_ReadSpeedByID	24	static
+../Core/Src/zdtEmm.c:56:6:ZDT_Emm_RxHandler	40	static
+../Core/Src/zdtEmm.c:77:6:ZDT_Emm_EnableByID	24	static
+../Core/Src/zdtEmm.c:91:6:ZDT_Emm_SetSingleMotorSpeed	32	static
+../Core/Src/zdtEmm.c:111:6:ZDT_Emm_ReadSingleMotorSpeed	24	static
+../Core/Src/zdtEmm.c:120:6:ZDT_Emm_EnableSingleMotor	24	static
+../Core/Src/zdtEmm.c:131:7:ZDT_Emm_GetSingleMotorSpeed	24	static

@@ -1,5 +1,9 @@
-../Core/Src/zdtEmm.c:12:6:ZDT_Emm_Init	1
-../Core/Src/zdtEmm.c:21:6:ZDT_Emm_Enable	1
-../Core/Src/zdtEmm.c:34:6:ZDT_Emm_SetSpeed	3
-../Core/Src/zdtEmm.c:66:6:ZDT_Emm_ReadSpeed	1
-../Core/Src/zdtEmm.c:75:6:ZDT_Emm_RxHandler	11
+../Core/Src/zdtEmm.c:12:6:ZDT_Emm_InitAll	1
+../Core/Src/zdtEmm.c:30:6:ZDT_Emm_SetSpeedByID	2
+../Core/Src/zdtEmm.c:48:6:ZDT_Emm_ReadSpeedByID	1
+../Core/Src/zdtEmm.c:56:6:ZDT_Emm_RxHandler	7
+../Core/Src/zdtEmm.c:77:6:ZDT_Emm_EnableByID	1
+../Core/Src/zdtEmm.c:91:6:ZDT_Emm_SetSingleMotorSpeed	2
+../Core/Src/zdtEmm.c:111:6:ZDT_Emm_ReadSingleMotorSpeed	1
+../Core/Src/zdtEmm.c:120:6:ZDT_Emm_EnableSingleMotor	1
+../Core/Src/zdtEmm.c:131:7:ZDT_Emm_GetSingleMotorSpeed	3
