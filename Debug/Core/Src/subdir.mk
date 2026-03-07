@@ -9,6 +9,7 @@ C_SRCS += \
 ../Core/Src/dma.c \
 ../Core/Src/gpio.c \
 ../Core/Src/main.c \
+../Core/Src/mecanum_chassis.c \
 ../Core/Src/serialPlot.c \
 ../Core/Src/stm32f4xx_hal_msp.c \
 ../Core/Src/stm32f4xx_it.c \
@@ -26,6 +27,7 @@ C_DEPS += \
 ./Core/Src/dma.d \
 ./Core/Src/gpio.d \
 ./Core/Src/main.d \
+./Core/Src/mecanum_chassis.d \
 ./Core/Src/serialPlot.d \
 ./Core/Src/stm32f4xx_hal_msp.d \
 ./Core/Src/stm32f4xx_it.d \
@@ -43,6 +45,7 @@ OBJS += \
 ./Core/Src/dma.o \
 ./Core/Src/gpio.o \
 ./Core/Src/main.o \
+./Core/Src/mecanum_chassis.o \
 ./Core/Src/serialPlot.o \
 ./Core/Src/stm32f4xx_hal_msp.o \
 ./Core/Src/stm32f4xx_it.o \
@@ -63,7 +66,7 @@ Core/Src/%.o Core/Src/%.su Core/Src/%.cyclo: ../Core/Src/%.c Core/Src/subdir.mk
 clean: clean-Core-2f-Src
 
 clean-Core-2f-Src:
-	-$(RM) ./Core/Src/can.cyclo ./Core/Src/can.d ./Core/Src/can.o ./Core/Src/can.su ./Core/Src/dma.cyclo ./Core/Src/dma.d ./Core/Src/dma.o ./Core/Src/dma.su ./Core/Src/gpio.cyclo ./Core/Src/gpio.d ./Core/Src/gpio.o ./Core/Src/gpio.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/serialPlot.cyclo ./Core/Src/serialPlot.d ./Core/Src/serialPlot.o ./Core/Src/serialPlot.su ./Core/Src/stm32f4xx_hal_msp.cyclo ./Core/Src/stm32f4xx_hal_msp.d ./Core/Src/stm32f4xx_hal_msp.o ./Core/Src/stm32f4xx_hal_msp.su ./Core/Src/stm32f4xx_it.cyclo ./Core/Src/stm32f4xx_it.d ./Core/Src/stm32f4xx_it.o ./Core/Src/stm32f4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32f4xx.cyclo ./Core/Src/system_stm32f4xx.d ./Core/Src/system_stm32f4xx.o ./Core/Src/system_stm32f4xx.su ./Core/Src/tim.cyclo ./Core/Src/tim.d ./Core/Src/tim.o ./Core/Src/tim.su ./Core/Src/usart.cyclo ./Core/Src/usart.d ./Core/Src/usart.o ./Core/Src/usart.su ./Core/Src/zdtCan.cyclo ./Core/Src/zdtCan.d ./Core/Src/zdtCan.o ./Core/Src/zdtCan.su ./Core/Src/zdtEmm.cyclo ./Core/Src/zdtEmm.d ./Core/Src/zdtEmm.o ./Core/Src/zdtEmm.su ./Core/Src/zdtUart.cyclo ./Core/Src/zdtUart.d ./Core/Src/zdtUart.o ./Core/Src/zdtUart.su
+	-$(RM) ./Core/Src/can.cyclo ./Core/Src/can.d ./Core/Src/can.o ./Core/Src/can.su ./Core/Src/dma.cyclo ./Core/Src/dma.d ./Core/Src/dma.o ./Core/Src/dma.su ./Core/Src/gpio.cyclo ./Core/Src/gpio.d ./Core/Src/gpio.o ./Core/Src/gpio.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/mecanum_chassis.cyclo ./Core/Src/mecanum_chassis.d ./Core/Src/mecanum_chassis.o ./Core/Src/mecanum_chassis.su ./Core/Src/serialPlot.cyclo ./Core/Src/serialPlot.d ./Core/Src/serialPlot.o ./Core/Src/serialPlot.su ./Core/Src/stm32f4xx_hal_msp.cyclo ./Core/Src/stm32f4xx_hal_msp.d ./Core/Src/stm32f4xx_hal_msp.o ./Core/Src/stm32f4xx_hal_msp.su ./Core/Src/stm32f4xx_it.cyclo ./Core/Src/stm32f4xx_it.d ./Core/Src/stm32f4xx_it.o ./Core/Src/stm32f4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32f4xx.cyclo ./Core/Src/system_stm32f4xx.d ./Core/Src/system_stm32f4xx.o ./Core/Src/system_stm32f4xx.su ./Core/Src/tim.cyclo ./Core/Src/tim.d ./Core/Src/tim.o ./Core/Src/tim.su ./Core/Src/usart.cyclo ./Core/Src/usart.d ./Core/Src/usart.o ./Core/Src/usart.su ./Core/Src/zdtCan.cyclo ./Core/Src/zdtCan.d ./Core/Src/zdtCan.o ./Core/Src/zdtCan.su ./Core/Src/zdtEmm.cyclo ./Core/Src/zdtEmm.d ./Core/Src/zdtEmm.o ./Core/Src/zdtEmm.su ./Core/Src/zdtUart.cyclo ./Core/Src/zdtUart.d ./Core/Src/zdtUart.o ./Core/Src/zdtUart.su
 
 .PHONY: clean-Core-2f-Src
 

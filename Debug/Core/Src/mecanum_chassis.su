@@ -1,0 +1,5 @@
+../Core/Src/mecanum_chassis.c:17:6:Mecanum_Kinematics	48	static
+../Core/Src/mecanum_chassis.c:29:7:MsToRpm	16	static
+../Core/Src/mecanum_chassis.c:38:6:SetAllMotorsSpeed	24	static
+../Core/Src/mecanum_chassis.c:48:6:ReadAllMotorsSpeed	8	static
+../Core/Src/mecanum_chassis.c:58:6:StopAllMotors	8	static

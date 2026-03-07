@@ -32,6 +32,7 @@
 #include "zdtUart.h"
 #include <stdio.h>
 #include <math.h>
+#include "mecanum_chassis.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -52,89 +53,25 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-#define WHEEL_DIAMETER  0.075f      // 轮子直径 100mm (需根据实际修改)
-#define ROBOT_W         0.229f      // 轮距 (左右轮距离)
-#define ROBOT_H         0.255f      // 轴距 (前后轮距离)
-#define TARGET_DIST     2.0f       // 目标移动距离 2 米
-#define MOVE_SPEED      0.3f       // 移动速度 0.3 m/s
-
 extern ZDT_Motor_t motors[4];
-// 里程计变量
-float current_distance = 0.0f;
-float last_distance = 0.0f;
+
 uint32_t last_odom_tick = 0;
 uint8_t move_state = 0; // 0:向前，1:停，2:向后，3:停
 
 // 4个电机速度缓存
-float motor_speeds[4] = {0};  // 0:ID1左后，1:ID2左前，2:ID3右前，3:ID4右后
+float motor_target_speed[4] = {0};  // 目标速度
+float motor_actual_speed[4] = {0};  // 实际速度
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-// ✅ 添加函数声明（解决隐式声明警告）
-void Mecanum_Kinematics(float Vx, float Vy, float Vz, float *V_bl, float *V_fl, float *V_fr, float *V_br);
-float MsToRpm(float v_ms);
-void SetAllMotorsSpeed(float V_bl, float V_fl, float V_fr, float V_br);
-void ReadAllMotorsSpeed(void);
-void StopAllMotors(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void Mecanum_Kinematics(float Vx, float Vy, float Vz, float *V_bl, float *V_fl, float *V_fr, float *V_br) {
-    float L = (ROBOT_H / 2.0f) + (ROBOT_W / 2.0f);
-    // 依据用户提供的公式
-    *V_bl = Vx + Vy - Vz * L;  // ID 1 左后
-    *V_fl = Vx - Vy - Vz * L;  // ID 2 左前
-    *V_fr = -(Vx + Vy + Vz * L);  // ID 3 右前
-    *V_br = -(Vx - Vy + Vz * L);  // ID 4 右后
-}
 
-// ✅ 线速度转 RPM 函数
-float MsToRpm(float v_ms) {
-    if (WHEEL_DIAMETER <= 0) return 0;
-    // V = RPM * π * D / 60  =>  RPM = V * 60 / (π * D)
-    return v_ms * 60.0f / (3.1415926f * WHEEL_DIAMETER);
-}
-
-// ✅ 设置 4 个轮子速度
-void SetAllMotorsSpeed(float V_bl, float V_fl, float V_fr, float V_br) {
-    ZDT_Emm_SetSpeedByID(1, MsToRpm(V_bl));  // ID 1: 左后
-    ZDT_Emm_SetSpeedByID(2, MsToRpm(V_fl));  // ID 2: 左前
-    ZDT_Emm_SetSpeedByID(3, MsToRpm(V_fr));  // ID 3: 右前
-    ZDT_Emm_SetSpeedByID(4, MsToRpm(V_br));  // ID 4: 右后
-}
-
-// ✅ 读取 4 个轮子速度 (用于里程计)
-void ReadAllMotorsSpeed(void) {
-    ZDT_Emm_ReadSpeedByID(1);
-    ZDT_Emm_ReadSpeedByID(2);
-    ZDT_Emm_ReadSpeedByID(3);
-    ZDT_Emm_ReadSpeedByID(4);
-}
-
-// ✅ 计算里程计（速度积分）
-void UpdateOdometry(void) {
-    // 计算4轮平均线速度 (m/s)
-    float avg_rpm = (motors[0].actual_speed + motors[1].actual_speed +
-                     motors[2].actual_speed + motors[3].actual_speed) / 4.0f;
-    float avg_ms = avg_rpm * 3.1415926f * WHEEL_DIAMETER / 60.0f;
-
-    // 计算时间间隔 (秒)
-    uint32_t current_tick = HAL_GetTick();
-    float dt = (current_tick - last_odom_tick) / 1000.0f;
-    last_odom_tick = current_tick;
-
-    // 速度积分计算距离
-    float delta_dist = avg_ms * dt;
-    current_distance += delta_dist;
-}
-
-// ✅ 停止所有电机
-void StopAllMotors(void) {
-    SetAllMotorsSpeed(0, 0, 0, 0);
-}
 /* USER CODE END 0 */
 
 /**
@@ -207,7 +144,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  float V1, V2, V3, V4;
-	     Mecanum_Kinematics(MOVE_SPEED, 0, 0, &V1, &V2, &V3, &V4);
+	     Mecanum_Kinematics(0, 0.3f, 0, &V1, &V2, &V3, &V4);//现在的参数顺序是 (Vx:右移, Vy:前进, Vz:逆时针自转)
 	     SetAllMotorsSpeed(V1, V2, V3, V4);
 
 	     // 小延时，避免CPU占用过高

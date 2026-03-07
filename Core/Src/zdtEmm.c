@@ -79,7 +79,7 @@ void ZDT_Emm_EnableByID(uint8_t id) {
     // 依据：P48 5.3.2 电机使能控制 (假设协议：0xF3 + 使能位 + 状态位 + 校验)
     // 注意：请根据你手里的 ZDT 驱动器手册核对具体字节含义
     tx_data[0] = 0xF3; // 功能码
-    tx_data[1] = 0x01; // 使能
+    tx_data[1] = 0xAB; // 使能
     tx_data[2] = 0x00; // 0x00为使能，0x01为释放
     tx_data[3] = 0x6B; // 校验码
 
