@@ -85,7 +85,7 @@ main-build: serialPlotTest.elf secondary-outputs
 
 # 工具调用
 serialPlotTest.elf serialPlotTest.map: $(OBJS) $(USER_OBJS) C:\Users\steph\STM32CubeIDE\workspace_1.19.0\serialPlotTest\STM32F407VETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-g++ -o "serialPlotTest.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\steph\STM32CubeIDE\workspace_1.19.0\serialPlotTest\STM32F407VETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="serialPlotTest.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -lstdc++ -lsupc++ -Wl,--end-group
+	arm-none-eabi-g++ -o "serialPlotTest.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\steph\STM32CubeIDE\workspace_1.19.0\serialPlotTest\STM32F407VETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="serialPlotTest.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -lstdc++ -lsupc++ -Wl,--end-group
 	@echo '已结束构建目标： $@'
 	@echo ' '
 

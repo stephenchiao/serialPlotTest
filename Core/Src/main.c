@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "mecanum_chassis.h"
+#include "ops9.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -107,7 +108,12 @@ int main(void)
   MX_CAN1_Init();
   MX_USART1_UART_Init();
   MX_TIM3_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  // 声明外部的接收缓存变量
+  extern uint8_t ops9_rx_byte;
+  // 开启 USART2 单字节中断接收
+  HAL_UART_Receive_IT(&huart2, &ops9_rx_byte, 1);
   // 1. 初始化 CAN 和过滤器
   ZDT_CAN_ConfigFilter();
 
@@ -144,11 +150,14 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  float V1, V2, V3, V4;
-	     Mecanum_Kinematics(0, 0.3f, 0, &V1, &V2, &V3, &V4);//现在的参数顺序是 (Vx:右移, Vy:前进, Vz:逆时针自转)
+	     Mecanum_Kinematics(0, 0, 0, &V1, &V2, &V3, &V4);//现在的参数顺序是 (Vx:右移, Vy:前进, Vz:逆时针自转)
 	     SetAllMotorsSpeed(V1, V2, V3, V4);
 
 	     // 小延时，避免CPU占用过高
 	     HAL_Delay(10);
+	     printf("X: %.2f mm, Y: %.2f mm, Yaw: %.2f deg\r\n", robot_x, robot_y, robot_yaw);
+
+	     HAL_Delay(50); // 延时 50ms，每秒打印 20 次
   }
   /* USER CODE END 3 */
 }
@@ -204,7 +213,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
     ZDT_CAN_RxFIFO0_Handler(hcan);
 }
-
+int _write(int file, char *ptr, int len)
+{
+    // 注意：假设你连接电脑的串口是 USART1。如果是其他串口，请修改 &huart1
+    HAL_UART_Transmit(&huart1, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+    return len;
+}
 // 定时器中断回调 (10ms 一次)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
@@ -213,6 +227,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         // flag_plot_10ms = 1;
     }
 }
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    // 调用 OPS-9 解析函数
+    OPS9_UART_RxCpltCallback(huart);
+}
+
 /* USER CODE END 4 */
 
 /**
