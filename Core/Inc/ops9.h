@@ -17,7 +17,7 @@ extern float robot_yaw;
 
 // OPS-9 串口接收中断处理函数声明
 void OPS9_UART_RxCpltCallback(UART_HandleTypeDef *huart);
-
+void OPS9_Reset_Zero(void);
 
 
 #endif /* INC_OPS9_H_ */

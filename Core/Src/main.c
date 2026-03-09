@@ -34,6 +34,7 @@
 #include <math.h>
 #include "mecanum_chassis.h"
 #include "ops9.h"
+#include "pid.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -62,6 +63,9 @@ uint8_t move_state = 0; // 0:向前，1:停，2:向后，3:停
 // 4个电机速度缓存
 float motor_target_speed[4] = {0};  // 目标速度
 float motor_actual_speed[4] = {0};  // 实际速度
+PID_Controller pid_x;
+PID_Controller pid_y;
+PID_Controller pid_yaw;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -135,11 +139,28 @@ int main(void)
   ZDT_Emm_EnableByID(4);
   HAL_Delay(100);  // 等待使能完成
 
-  // 5. 启动定时器（用于定时读取速度）
+  // 5.启动定时器（用于定时读取速度）
   HAL_TIM_Base_Start_IT(&htim3);
 
   // 6. 初始化里程计计时器
   last_odom_tick = HAL_GetTick();
+
+  //7.初始化PID参数
+  // 注意：坐标单位是 mm，误差 1000mm 时，乘以 Kp=0.001，算出的速度正好是 1.0 m/s
+    PID_Init(&pid_x,   0.002f, 0.0f, 0.0f, 0.3f, 0.1f);  // X轴纠偏：限速 0.3 m/s
+    PID_Init(&pid_y,   0.001f, 0.0f, 0.0f, 0.3f, 0.2f);  // Y轴主干：限速 0.5 m/s (比较安全的测试速度)
+    PID_Init(&pid_yaw, 0.02f,  0.0f, 0.0f, 0.5f, 0.2f);  // 角度纠偏：限速 0.5 rad/s
+
+    // 设定小车的首个演示目标
+    PID_SetTarget(&pid_x, 0.0f);     // 目标 X 坐标 = 0
+    PID_SetTarget(&pid_y, 300.0f);  // 目标 Y 坐标 = 1000 (向前直行 1米)
+    PID_SetTarget(&pid_yaw, 0.0f);   // 目标角度 = 0 (车头保持朝前不变)
+
+    for(int i = 5; i > 0; i--) {
+          printf("Counting down: %d\r\n", i);
+          HAL_Delay(1000); // 延时 1000ms (1秒)
+      }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -149,15 +170,25 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  float V1, V2, V3, V4;
-	     Mecanum_Kinematics(0, 0, 0, &V1, &V2, &V3, &V4);//现在的参数顺序是 (Vx:右移, Vy:前进, Vz:逆时针自转)
-	     SetAllMotorsSpeed(V1, V2, V3, V4);
+	  // 1. 根据当前 OPS-9 的实时绝对坐标，计算出三个维度的期望速度
+	      float out_x   = PID_Calc(&pid_x, robot_x);
+	      float out_y   = PID_Calc(&pid_y, robot_y);
+	      float out_yaw = PID_Calc(&pid_yaw, robot_yaw);
 
-	     // 小延时，避免CPU占用过高
-	     HAL_Delay(10);
-	     printf("X: %.2f mm, Y: %.2f mm, Yaw: %.2f deg\r\n", robot_x, robot_y, robot_yaw);
+	      // 2. 将 PID 算出的速度喂给麦克纳姆轮底盘进行逆解算
+	      float V1, V2, V3, V4;
+	      // (坐标系已对齐：out_x对应向右Vx，out_y对应向前Vy，out_yaw对应逆时针Vz)
+	      Mecanum_Kinematics(out_x, out_y, out_yaw, &V1, &V2, &V3, &V4);
 
-	     HAL_Delay(50); // 延时 50ms，每秒打印 20 次
+	      // 3. 把解算出来的四个轮子转速发送给 CAN 电机驱动
+	      SetAllMotorsSpeed(V1, V2, V3, V4);
+
+	      // 4. 打印实时状态，方便通过串口助手观察小车位姿和收敛情况
+	      printf("Pos(%.0f, %.0f) Yaw:%.1f | Out[X:%.2f Y:%.2f Yaw:%.2f]\r\n",
+	             robot_x, robot_y, robot_yaw, out_x, out_y, out_yaw);
+
+	      // 5. PID 控制周期定为 20ms (50Hz 控制频率)
+	      HAL_Delay(20);
   }
   /* USER CODE END 3 */
 }

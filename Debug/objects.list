@@ -4,6 +4,7 @@
 "./Core/Src/main.o"
 "./Core/Src/mecanum_chassis.o"
 "./Core/Src/ops9.o"
+"./Core/Src/pid.o"
 "./Core/Src/serialPlot.o"
 "./Core/Src/stm32f4xx_hal_msp.o"
 "./Core/Src/stm32f4xx_it.o"

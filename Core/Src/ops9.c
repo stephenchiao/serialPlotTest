@@ -7,17 +7,16 @@
 #include "ops9.h"
 #include "usart.h" // 需要用到 huart2
 
-// 暴露给外部使用的坐标变量（已转换为你的坐标系：X前，Y左）
+// 暴露给外部使用的坐标变量（X向右为正，Y向前为正）
 float robot_x = 0.0f;
 float robot_y = 0.0f;
 float robot_yaw = 0.0f;
 
 // 用于 HAL 库单字节接收的缓存
 uint8_t ops9_rx_byte;
+static uint8_t count = 0; // 状态机步骤计数
+static uint8_t i = 0;     // 数据数组索引
 
-// 数据解析状态机变量
-static uint8_t count = 0;
-static uint8_t i = 0;
 
 // 利用共用体直接将24个字节转换为6个浮点数
 static union {
@@ -33,7 +32,8 @@ void OPS9_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART2) // 确认是 OPS-9 所在的串口2
     {
-        uint8_t ch = ops9_rx_byte;
+
+    	uint8_t ch = ops9_rx_byte;
 
         // 状态机解析 (参考官方手册附录)
         switch (count)
@@ -81,8 +81,8 @@ void OPS9_UART_RxCpltCallback(UART_HandleTypeDef *huart)
                     float ops_pos_y  = posture.ActVal[4];
 
                     // === 坐标系转换 (将OPS9的"Y前X右" 转为你的 "X前Y左") ===
-                    robot_x = ops_pos_y;    // OPS的Y(前) -> 你的X(前)
-                    robot_y = -ops_pos_x;   // OPS的X(右) -> 你的Y(左)
+                    robot_x = ops_pos_x;    // OPS的Y(前) -> 你的X(前)
+                    robot_y = ops_pos_y;   // OPS的X(右) -> 你的Y(左)
                     robot_yaw = ops_zangle; // 航向角 (假设逆时针为正，如需取反加负号即可)
                 }
                 count = 0;
@@ -97,6 +97,10 @@ void OPS9_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         HAL_UART_Receive_IT(&huart2, &ops9_rx_byte, 1);
     }
 }
-
+void OPS9_Reset_Zero(void)
+{
+    // 通过 USART2 发送 "ACTO"，长度为 4 字节，超时时间 100ms
+    HAL_UART_Transmit(&huart2, (uint8_t *)"ACTO", 4, 100);
+}
 
 
