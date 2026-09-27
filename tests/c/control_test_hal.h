@@ -66,6 +66,7 @@ void __set_PRIMASK(uint32_t value);
 void Error_Handler(void);
 HAL_StatusTypeDef HAL_CAN_ConfigFilter(CAN_HandleTypeDef *, CAN_FilterTypeDef *);
 HAL_StatusTypeDef HAL_CAN_Start(CAN_HandleTypeDef *);
+HAL_StatusTypeDef HAL_CAN_Init(CAN_HandleTypeDef *);
 HAL_StatusTypeDef HAL_CAN_Stop(CAN_HandleTypeDef *);
 HAL_StatusTypeDef HAL_CAN_ActivateNotification(CAN_HandleTypeDef *, uint32_t);
 HAL_StatusTypeDef HAL_CAN_AbortTxRequest(CAN_HandleTypeDef *, uint32_t);

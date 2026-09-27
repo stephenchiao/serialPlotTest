@@ -3,6 +3,9 @@
 本文档依据当前 `Core/Src/robot_app.c`、`Core/Src/llm_tuner.c` 和
 `Core/Inc/llm_tuner.h` 整理，适用于通过普通串口助手向 STM32F407 发送文本命令。
 
+2026-09-28 起，CAN1 使用无轮速反馈控制：取消 PLOT 和后台查询；轮速缓存仅供
+按需诊断，运动和恢复不再要求新鲜轮速。详见 `can-command-only-2026-09-28.md`。
+
 ## 1. 串口设置
 
 | 项目 | 设置 |
@@ -16,7 +19,7 @@
 | 行结束 | `LF` 或 `CRLF`，每条命令单独一行 |
 
 命令区分大小写，本文示例均使用固件接受的大写形式。普通状态输出以 `#` 开头，
-连续遥测以 `@W` 或 `@P` 开头，PID 调参数据为不带前缀的 CSV。
+位姿遥测以 `@P` 开头，PID 调参数据为不带前缀的 CSV。
 
 上电后固件等待主机声明所有权。未声明主机时仅接受 `PING`、`PROTO VERSION`、
 `HELP` 和 `STOP`。
@@ -72,10 +75,10 @@ MOTOR FEEDBACK
 |---|---|---|
 | `MODE WORK` | 正常工作模式 | `POSE SET`；允许使能 G6220 |
 | `MODE TUNE` | PID 调参和台架测试 | PID 轮次、`MOTOR RUN`、`MOVE`、`TURN` |
-| `MODE PLOT` | 手动动作与连续遥测 | `MOTOR RUN`、`MOVE`、`TURN`，自动打开 BOTH 遥测 |
+| `MODE PLOT` | 已停用 | 返回 PLOT RETIRED；调试动作使用 TUNE |
 | `MODE STATUS` | 查询当前模式 | 不产生运动 |
 
-所有模式切换都会先停车并清除旧运动状态。切换到 `WORK` 或 `PLOT` 时，电机掩码
+所有模式切换都会先停车并清除旧运动状态。切换到 `WORK` 时，电机掩码
 恢复为 `0x0F`；`MODE TUNE` 保留当前掩码。
 
 ## 4. 诊断命令
@@ -84,15 +87,15 @@ MOTOR FEEDBACK
 |---|---|
 | `CAN STATUS` | CAN1 状态、HAL 错误、邮箱、TX/RX、超时、恢复次数、ESR/TSR、TEC/REC |
 | `MOTOR FEEDBACK` | ID1～4 的反馈有效性、实际 RPM、年龄和序号 |
-| `MOTOR STOP STATUS` | 停车确认状态、当前掩码、反馈新鲜度和耗时 |
+| `MOTOR STOP STATUS` | 停车命令状态、掩码、诊断新鲜度和耗时；SENT 仅代表 CAN 发送完成 |
 | `CONTROL STATUS` | 主循环最大周期、控制超时、UART 队列和 CAN 队列统计 |
 | `HOST RX STATUS` | 文本接收丢弃数和无效命令统计 |
 | `OPS STATUS` | OPS 链路、原始坐标、车体中心坐标、帧计数和数据年龄 |
 | `POSE STATUS` | 位姿目标、当前坐标、规划速度与实际命令速度 |
 | `PID STATUS ALL` | 一次打印 X、Y、YAW 三轴 PID 系数 |
-| `MOTOR MASK STATUS` | 当前参与控制与反馈检查的电机掩码 |
+| `MOTOR MASK STATUS` | 当前参与控制的电机掩码 |
 | `TELEM STATUS` | 连续遥测选择、序号和发送统计 |
-| `PLOT STATUS` | PLOT/遥测状态与发送统计 |
+| `PLOT STATUS` | 返回 ENABLED=0 RETIRED=1 |
 | `G6220 STATUS` | CAN2 上 G6220 的状态和反馈 |
 
 `OPS STATUS` 中的 `LINK` 含义：
@@ -127,8 +130,8 @@ MOTOR FEEDBACK
 | 命令 | 作用 |
 |---|---|
 | `MOTOR EN <id>` | 使能指定电机 |
-| `MOTOR DIS <id>` | 先置零速，再失能指定电机 |
-| `MOTOR STOP <id>` | 指定电机置零速但不失能 |
+| `MOTOR DIS <id>` | 先立即停止，再失能指定电机 |
+| `MOTOR STOP <id>` | 指定电机立即停止但不失能 |
 | `MOTOR STOP ALL` | 停止当前掩码内全部 ZDT 电机，并取消其他底盘运动 |
 | `MOTOR GET <id>` | 主动读取指定电机的转速和状态 |
 
@@ -142,7 +145,7 @@ MOTOR RUN <id> <signed_rpm> [duration_ms]
 
 参数限制：
 
-- 仅允许在 `TUNE` 或 `PLOT` 模式运行；
+- 仅允许在 `TUNE` 模式运行；
 - `id`：1～4；
 - `signed_rpm`：非零，范围 `-300～+300 RPM`；
 - `duration_ms`：可省略，默认 2000 ms，范围 100～10000 ms；
@@ -168,10 +171,9 @@ MOTOR MASK STATUS
 
 只有 `TUNE` 模式可以修改掩码。修改掩码会立即停车。掩码同时决定：
 
-- 后台轮询哪些电机；
 - 单电机命令可以操作哪些电机；
-- TUNE ARMING 阶段要求哪些电机反馈有效；
-- 停车确认检查哪些电机。
+- 底盘速度下发到哪些电机；
+- TUNE ARMING 与故障恢复要求哪些电机的停车帧发送完成。
 
 常用值：
 
@@ -189,7 +191,7 @@ MOTOR MASK STATUS
 
 ## 7. 底盘定时调试动作
 
-这些命令只允许在 `TUNE` 或 `PLOT` 模式使用，要求 `MASK=0x0F`、CAN 正常且
+这些命令只允许在 `TUNE` 模式使用，要求 `MASK=0x0F`、CAN 正常且
 OPS 数据新鲜。动作到期后自动停车。
 
 ### 平移
@@ -249,7 +251,7 @@ POSE STOP
 - `x_mm`、`y_mm` 是 OPS 全局绝对坐标，单位 mm；
 - `yaw_deg` 是 OPS 航向角，单位 degree；
 - 相对当前车体中心的单次目标距离不能超过 10000 mm；
-- 启动前要求 CAN 正常、四轮反馈有效且 OPS 数据新鲜；
+- 启动前要求 CAN 正常且 OPS 数据新鲜；
 - 控制过程先平移并保持起始航向，到位停车后再原地转到目标航向；
 - 位置容差 2 mm，航向容差 0.5°；
 - 正常完成时输出 `# POSE TARGET ...`；
@@ -389,32 +391,23 @@ hold_cross_output,hold_yaw_output,center_x,center_y
 | 14～15 | 交叉轴与航向保持输出 |
 | 16～17 | 经过 OPS 安装偏置修正后的车体中心坐标 |
 
-调参期间建议发送 `TELEM OFF`，避免 `@W`、`@P` 连续遥测与 TUNE CSV 混杂。
+调参期间建议发送 `TELEM OFF`，避免 `@P` 连续遥测与 TUNE CSV 混杂。
 
 ## 10. 连续遥测与 PLOT
 
 | 命令 | 作用 |
 |---|---|
 | `TELEM OFF` | 关闭连续遥测 |
-| `TELEM WHEEL` | 只输出轮速遥测 |
+| `TELEM WHEEL` | 已停用，返回 PLOT RETIRED |
 | `TELEM POSE` | 只输出位姿遥测 |
-| `TELEM BOTH` | 交替输出轮速与位姿遥测 |
+| `TELEM BOTH` | 已停用，返回 PLOT RETIRED |
 | `TELEM STATUS` | 查看遥测状态 |
-| `PLOT ON` | 兼容命令：进入 `PLOT` 并打开 BOTH 遥测 |
+| `PLOT ON` | 已停用，返回 PLOT RETIRED |
 | `PLOT OFF` | 关闭遥测并回到 `WORK` |
-| `PLOT STATUS` | 查看 PLOT 与遥测状态 |
+| `PLOT STATUS` | 查看停用状态 |
 
-单独选择 WHEEL 或 POSE 时，每组周期约 50 ms。选择 BOTH 时两组每 25 ms 交替，
-每一种数据仍约 50 ms 一帧。
-
-轮速格式：
-
-```text
-@W,1,tick_ms,sequence,target_id1,target_id2,target_id3,target_id4,
-actual_id1,actual_id2,actual_id3,actual_id4
-```
-
-速度单位为 RPM。
+POSE 周期约 50 ms。没有后台电机查询，轮速需要 `MOTOR GET <id>` 按需读取。
+`MOTOR FEEDBACK` 的 AGE 增长、VALID=0 不再阻止运动或故障恢复。
 
 位姿格式：
 
@@ -491,13 +484,12 @@ MODE WORK
 | 返回 | 含义与处理 |
 |---|---|
 | `# ERROR HOST NOT LINKED` | 先发送 `HOST LINK COM` |
-| `# ERROR MODE REQUIRED=TUNE|PLOT CURRENT=WORK` | 调试运动前切换到 `MODE TUNE` 或 `MODE PLOT` |
+| `# ERROR MODE REQUIRED=TUNE CURRENT=WORK` | 调试运动前切换到 `MODE TUNE` |
 | `# ERROR MODE REQUIRED=TUNE CURRENT=...` | PID 轮次前执行 `TUNE AXIS ...` |
 | `# ERROR CHASSIS MOVE REQUIRES MOTOR MASK=0x0F` | 整车动作前恢复 `MOTOR MASK 0x0F` |
 | `# ERROR DEBUG CHASSIS SAFETY CAN=... OPS=...` | 检查 `CAN STATUS` 和 `OPS STATUS` |
 | `# ERROR MOTOR RUN CAN NOT READY ...` | CAN1 当前不允许运动，检查 ESR、TEC、REC 和电机供电 |
-| `# ROUND STOP MOTOR FEEDBACK NOT READY` | 检查掩码内电机的反馈有效性和年龄 |
-| `# ROUND STOP STOP NOT CONFIRMED` | 电机未在 ARMING 超时前确认零速 |
+| `# ROUND STOP STOP NOT SENT` | ARMING 超时前停车命令未发送完成，检查 CAN 与电机供电 |
 | `# ROUND STOP YAW LIMIT` | 平移过程中相对航向变化超过 15° |
 | `# ROUND STOP CROSS TRACK` | X/Y 测试的交叉方向偏移超过 50 mm |
 | `# ROUND STOP CAN FAULT` | 立即停止测试并保存 `CAN STATUS` 输出 |

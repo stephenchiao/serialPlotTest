@@ -254,35 +254,19 @@ void LLM_TunerProcess(uint32_t now)
 
     if (tuner_state == LLM_TUNE_STATE_ARMING) {
         uint8_t ops_ready;
-        uint8_t feedback_ready;
         uint8_t stop_confirmed;
         uint8_t can_ready;
-        uint8_t required_mask;
         now = HAL_GetTick();
         ops_ready = isfinite(ops.x_mm) && isfinite(ops.y_mm) &&
                     isfinite(ops.yaw_deg) && ops.frame_count > 0U &&
                     (uint32_t)(now - ops.last_update_tick) <= LLM_TUNE_OPS_TIMEOUT_MS;
-        /*
-         * 必须跟随 MOTOR MASK：硬编码 0x0F 会让单电机台架测试永远卡在
-         * ARMING，2 秒后报出含糊的 MOTOR FEEDBACK NOT READY。MASK=0x0F 时
-         * 与原来的四轮要求完全等价。
-         */
-        required_mask = Mecanum_GetRequiredMotorMask();
-        feedback_ready = Mecanum_FeedbackReady(required_mask);
-        stop_confirmed = Mecanum_GetStopStatus().state == MOTOR_STOP_CONFIRMED;
+        stop_confirmed = Mecanum_GetStopStatus().state == MOTOR_STOP_SENT;
         can_ready = ZDT_CAN_IsReady();
-        if (ops_ready && feedback_ready && stop_confirmed && can_ready) {
+        if (ops_ready && stop_confirmed && can_ready) {
             LLM_TunerBeginRun(now);
         } else if ((uint32_t)(now - tune_start_time) > LLM_TUNE_ARM_TIMEOUT_MS) {
             if (!ops_ready) LLM_TunerStopRound("OPS NOT READY");
-            else if (!feedback_ready) {
-                MotorFeedback samples[4];
-                ZDT_Emm_GetFeedback(samples);
-                LLM_TunerStopRound("MOTOR FEEDBACK NOT READY");
-                printf("# ROUND FEEDBACK MASK=0x%02X FRESH=0x%02X\r\n",
-                       required_mask, MotorFeedback_FreshMask(samples, HAL_GetTick()));
-            }
-            else if (!stop_confirmed) LLM_TunerStopRound("STOP NOT CONFIRMED");
+            else if (!stop_confirmed) LLM_TunerStopRound("STOP NOT SENT");
             else LLM_TunerStopRound("CAN NOT READY");
         }
         return;

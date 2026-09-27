@@ -41,13 +41,18 @@ uint8_t Mecanum_FeedbackReady(uint8_t mask)
 }
 void Mecanum_ProcessFeedback(uint32_t now)
 {
-    MotorFeedback samples[4];
-    if (stop_motion_generation != ZDT_Emm_MotionGeneration()) stop_monitor.state = MOTOR_STOP_IDLE;
-    ZDT_Emm_GetFeedback(samples);
-    now = HAL_GetTick();
-    MotorStop_UpdateMasked(&stop_monitor, samples, required_motor_mask,
-                           ZDT_CAN_StopPending(), now);
-    if (stop_monitor.state == MOTOR_STOP_UNCONFIRMED && (uint32_t)(now - stop_retry_tick) >= 100U) {
+    if (stop_motion_generation != ZDT_Emm_MotionGeneration()) {
+        stop_monitor.state = MOTOR_STOP_IDLE;
+        return;
+    }
+    if (stop_monitor.state == MOTOR_STOP_IDLE) return;
+    if (ZDT_CAN_StopSent(required_motor_mask)) {
+        if (stop_monitor.state != MOTOR_STOP_SENT) stop_monitor.confirmed_tick = now;
+        stop_monitor.state = MOTOR_STOP_SENT; /* no physical zero-speed assertion */
+    } else if ((uint32_t)(now - stop_monitor.requested_tick) > MOTOR_STOP_TIMEOUT_MS) {
+        stop_monitor.state = MOTOR_STOP_UNCONFIRMED;
+    }
+    if (!ZDT_CAN_StopSent(required_motor_mask) && (uint32_t)(now - stop_retry_tick) >= 100U) {
         stop_retry_tick = now;
         Mecanum_ReportCanTxResult(ZDT_Emm_StopMask(required_motor_mask));
     }
@@ -81,11 +86,8 @@ uint8_t SetAllMotorsSpeed(float V_bl, float V_fl, float V_fr, float V_br) {
     uint8_t mask = required_motor_mask;
 
     applied_scale = 1.0f;
-    /* 只对启用掩码内的电机做反馈与下发判定：MASK=0x0F 时行为和四轮模式完全
-     * 一致，MASK=0x01 时允许单电机台架测试。 */
-    if (!isfinite(V_bl) || !isfinite(V_fl) || !isfinite(V_fr) || !isfinite(V_br) ||
-        ((V_bl != 0.0f || V_fl != 0.0f || V_fr != 0.0f || V_br != 0.0f) &&
-         !Mecanum_FeedbackReady(mask))) {
+    /* Feedback is optional; finite targets and speed limits remain mandatory. */
+    if (!isfinite(V_bl) || !isfinite(V_fl) || !isfinite(V_fr) || !isfinite(V_br)) {
         applied_scale = 0.0f;
         ZDT_CAN_RaiseFault();
         (void)StopAllMotors();

@@ -10,7 +10,7 @@ typedef struct {
     uint8_t valid, zero_streak;
 } MotorFeedback;
 typedef enum { MOTOR_STOP_IDLE, MOTOR_STOP_REQUESTED, MOTOR_STOP_WAIT_FEEDBACK,
-               MOTOR_STOP_CONFIRMED, MOTOR_STOP_UNCONFIRMED } MotorStopState;
+               MOTOR_STOP_CONFIRMED, MOTOR_STOP_UNCONFIRMED, MOTOR_STOP_SENT } MotorStopState;
 typedef struct {
     MotorStopState state;
     uint32_t requested_tick, confirmed_tick, baseline[4];

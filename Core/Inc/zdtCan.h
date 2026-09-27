@@ -10,10 +10,7 @@
 
 typedef void (*ZDT_CAN_RxCallback_t)(uint32_t ExtId, uint8_t *Data, uint8_t Len);
 
-/*
- * CAN1 传输层快照。就绪判定同时检查 tx_fault 和当前 ESR/HAL 状态。
- * 累计计数供诊断使用，恢复逻辑也用其增量确认通信进展。
- */
+/* TX counters and stop delivery are bus evidence; motor RX is diagnostic. */
 typedef struct {
     /* 收发结果 */
     uint32_t tx_ok;             /* TXOK 完成回调次数：真正发上总线的帧数 */
@@ -22,14 +19,14 @@ typedef struct {
 
     /* 当前状态 */
     uint32_t fault_generation;
-    uint8_t recovery_phase;     /* 0=healthy, 1=fault, 2=link observed; not permission */
+    uint8_t recovery_phase;     /* 0=healthy, 1=fault */
     uint8_t tx_fault;           /* 发送故障锁存：最近有发送未按时完成 */
-    uint8_t last_tx_result;     /* 0=完成 2=提交失败 4=邮箱超时 5=总线错误 */
+    uint8_t last_tx_result;     /* 0=完成 2=提交失败 4=邮箱超时 */
 
     /* 恢复计数 */
     uint32_t recoveries;        /* 静止条件下解除旧故障的次数 */
-    uint32_t auto_recoveries;   /* 兼容旧状态字段；不再自动解锁，保持为 0 */
-    uint32_t stall_recoveries;  /* 邮箱卡死(FREE=0 且 TXOK 停增)强制恢复次数 */
+    uint32_t auto_recoveries;   /* reserved compatibility counter */
+    uint32_t stall_recoveries;  /* 邮箱撤销卡住/HAL不可用时重启成功次数 */
 
     /* 控制器寄存器快照 */
     uint32_t esr, tsr;
@@ -42,12 +39,12 @@ typedef struct {
 
 void ZDT_CAN_Process(uint32_t now);
 uint8_t ZDT_CAN_IsReady(void);
-/* Main-loop only. eligible requires no active motion, fresh four-wheel feedback
- * and confirmed stop. Returns 1 only when an old transport fault was cleared. */
+/* Idle + STOP TXOK for requested wheels; no motor RX dependency. */
 uint8_t ZDT_CAN_RecoverWhenIdle(uint8_t eligible);
 /* 发送 API 仅由主循环调用；返回 0 表示已入队，不是电机 ACK。
- * STOP 丢弃旧普通队列并申请撤销邮箱，随后优先发送四轮零速。 */
+ * STOP 丢弃旧普通队列并申请撤销在途速度，随后优先发送立即停止命令。 */
 void ZDT_CAN_BeginStop(void);
+uint8_t ZDT_CAN_StopSent(uint8_t mask);
 uint8_t ZDT_CAN_SendStop(uint32_t id, uint8_t *data, uint8_t length);
 /* Consume notification only. The safety latch is cleared by idle recovery. */
 uint8_t ZDT_CAN_ConsumeFault(void);

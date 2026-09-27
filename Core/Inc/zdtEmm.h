@@ -45,6 +45,7 @@ extern ZDT_Motor_t motors[4];
  * 原先并存的 *SingleMotor* 别名已删除，避免同一功能两套入口。
  */
 void ZDT_Emm_InitAll(void);
+void ZDT_Emm_RefreshEnables(void);
 void ZDT_Emm_GetFeedback(MotorFeedback output[4]);
 /* 停车：motor_mask 位掩码，bit0..3 对应 ID1..4。 */
 uint8_t ZDT_Emm_StopMask(uint8_t motor_mask);

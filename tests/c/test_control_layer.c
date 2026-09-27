@@ -22,7 +22,7 @@ UART_HandleTypeDef huart1, huart2 = {USART2, HAL_UART_STATE_READY};
 static uint32_t tick, primask, pending, sent_count, abort_count, rx_remaining;
 static uint8_t auto_complete, fail_can, fail_uart, fail_abort;
 static uint32_t last_notify_mask, can_stop_count;
-static uint8_t fail_can_stop;
+static uint8_t fail_can_stop, fail_can_start, fail_notify;
 static struct { uint32_t id; uint8_t bytes[8]; } sent[256];
 static const uint8_t *dma_bytes;
 static uint16_t dma_length;
@@ -35,15 +35,22 @@ void __set_PRIMASK(uint32_t value) { primask = value; }
 void Error_Handler(void) { assert(0); }
 HAL_StatusTypeDef HAL_CAN_ConfigFilter(CAN_HandleTypeDef *h, CAN_FilterTypeDef *f)
 { (void)h; (void)f; return HAL_OK; }
-HAL_StatusTypeDef HAL_CAN_Start(CAN_HandleTypeDef *h) { (void)h; return HAL_OK; }
+HAL_StatusTypeDef HAL_CAN_Init(CAN_HandleTypeDef *h)
+{ (void)h; can_state = 1U; can_error = 0U; return HAL_OK; }
+HAL_StatusTypeDef HAL_CAN_Start(CAN_HandleTypeDef *h)
+{
+    (void)h;
+    if (fail_can_start) { can_state = 3U; can_error |= HAL_CAN_ERROR_TIMEOUT; return HAL_ERROR; }
+    can_state = HAL_CAN_STATE_LISTENING; can_error = 0U; return HAL_OK;
+}
 HAL_StatusTypeDef HAL_CAN_Stop(CAN_HandleTypeDef *h)
 {
     (void)h; can_stop_count++;
     if (fail_can_stop) { can_error |= HAL_CAN_ERROR_TIMEOUT; return HAL_ERROR; }
-    pending = 0U; return HAL_OK;
+    pending = 0U; can_state = 1U; return HAL_OK;
 }
 HAL_StatusTypeDef HAL_CAN_ActivateNotification(CAN_HandleTypeDef *h, uint32_t n)
-{ (void)h; last_notify_mask = n; return HAL_OK; }
+{ (void)h; last_notify_mask = n; return fail_notify ? HAL_ERROR : HAL_OK; }
 HAL_StatusTypeDef HAL_CAN_AbortTxRequest(CAN_HandleTypeDef *h, uint32_t mask)
 {
     (void)h; abort_count++;
@@ -101,22 +108,15 @@ static void expect_line(const char *line)
 static void can_reset(uint32_t now)
 {
     tick = now;
-    /* 先让邮箱空闲跑一轮 Process，清掉卡死观察窗，再走 BeginStop。 */
     pending = 0U;
-    ZDT_CAN_Process(tick);
-    ZDT_CAN_BeginStop();
     ZDT_CAN_TestResetFault();
     sent_count = 0U; fail_can = auto_complete = fail_abort = 0U;
+    fail_can_stop = fail_can_start = fail_notify = 0U;
     can_regs.ESR = 0U; can_error = 0U;
     can_state = HAL_CAN_STATE_LISTENING;
 }
 static void record_all(MotorFeedback samples[4], float rpm, uint32_t now)
 { unsigned i; for (i = 0U; i < 4U; ++i) MotorFeedback_Record(&samples[i], rpm, now); }
-static void driver_feedback(unsigned id, uint16_t rpm)
-{
-    uint8_t bytes[5] = {0x35, 0, (uint8_t)(rpm >> 8), (uint8_t)rpm, 0x6B};
-    ZDT_Emm_RxHandler(id << 8, bytes, sizeof(bytes));
-}
 
 static void test_pid_dt_and_limits(void)
 {
@@ -188,211 +188,6 @@ static void test_stop_confirmation(void)
     assert((MotorFeedback_FreshMask(samples, 3030U) & 0x0EU) == 0U);
 }
 
-static void test_can_queue_and_stop(void)
-{
-    uint8_t speed[7] = {0xF6, 0, 0, 20, 0, 0, 0x6B};
-    uint8_t query[2] = {0x35, 0x6B};
-    unsigned i;
-    can_reset(100); pending = 7U;
-    for (i = 1; i <= 4; ++i) assert(!ZDT_CAN_Send_ExtId(i << 8, speed, 7));
-    speed[3] = 40; assert(!ZDT_CAN_Send_ExtId(0x100, speed, 7));
-    ZDT_CAN_Process(tick); assert(sent_count == 0);
-    pending = 0; auto_complete = 1;
-    ZDT_CAN_Process(tick); assert(sent_count == 3 && sent[0].bytes[3] == 40);
-    ZDT_CAN_Process(tick); assert(sent_count == 4);
-    assert(!ZDT_CAN_Send_ExtId(0x100, query, 2));
-    assert(!ZDT_CAN_Send_ExtId(0x100, speed, 7));
-    pending = 7; auto_complete = 0;
-    ZDT_CAN_BeginStop(); assert(pending == 0 && abort_count > 0);
-    speed[3] = 0;
-    for (i = 1; i <= 4; ++i) assert(!ZDT_CAN_SendStop(i << 8, speed, 7));
-    assert(!ZDT_CAN_Send_ExtId(0x100, query, 2));
-    sent_count = 0; ZDT_CAN_Process(tick);
-    assert(sent_count == 3 && ZDT_CAN_StopPending());
-    for (i = 0; i < 3; ++i) assert(sent[i].bytes[0] == 0xF6 && sent[i].bytes[3] == 0);
-    pending = 0; ZDT_CAN_Process(tick); assert(sent_count == 4 && sent[3].id == 0x400);
-    ZDT_CAN_Process(tick); assert(sent_count == 4); /* Last STOP still in mailbox. */
-    pending = 0; assert(!ZDT_CAN_StopPending());
-    ZDT_CAN_Process(tick); assert(sent_count == 5 && sent[4].bytes[0] == 0x35);
-}
-
-static void test_can_timeout_enable_and_rx_budget(void)
-{
-    uint8_t query[] = {0x35, 0x6B};
-    uint8_t speed[] = {0xF6, 0, 0, 10, 0, 0, 0x6B};
-    uint8_t enable[] = {0xF3, 0xAB, 1, 0, 0x6B};
-    unsigned i;
-    can_reset(1000); pending = 7;
-    assert(!ZDT_CAN_Send_ExtId(0x100, speed, 7));
-    tick += 40; assert(!ZDT_CAN_Send_ExtId(0x100, speed, 7));
-    tick += 11; ZDT_CAN_Process(tick); assert(ZDT_CAN_ConsumeFault());
-    pending = 0; ZDT_CAN_Process(tick); assert(!sent_count);
-    can_reset(2000);
-    for (i = 0; i < 16; ++i) assert(!ZDT_CAN_Send_ExtId(0x100, query, 2));
-    assert(ZDT_CAN_Send_ExtId(0x100, query, 2)); assert(ZDT_CAN_ConsumeFault());
-    can_reset(UINT32_MAX - 2U); auto_complete = 1;
-    assert(!ZDT_CAN_Send_ExtId(0x100, enable, 5));
-    assert(!ZDT_CAN_Send_ExtId(0x100, speed, 7));
-    ZDT_CAN_Process(tick); assert(sent_count == 1);
-    tick = 1; ZDT_CAN_Process(tick); assert(sent_count == 1);
-    tick = 2; ZDT_CAN_Process(tick); assert(sent_count == 2);
-    can_reset(0x80000010U); auto_complete = 1;
-    assert(!ZDT_CAN_Send_ExtId(0x200, query, 2));
-    ZDT_CAN_Process(tick); assert(sent_count == 1); /* Long uptime, never enabled. */
-    fail_can = 1; assert(!ZDT_CAN_Send_ExtId(0x200, query, 2));
-    ZDT_CAN_Process(tick); assert(ZDT_CAN_ConsumeFault());
-    rx_remaining = 10; ZDT_CAN_RxFIFO0_Handler(&hcan1); assert(rx_remaining == 7);
-    can_reset(3000); auto_complete = 0;
-    assert(!ZDT_CAN_SendStop(0x100, speed, 7)); ZDT_CAN_Process(tick);
-    tick += 51; ZDT_CAN_Process(tick); assert(ZDT_CAN_ConsumeFault());
-}
-
-static void test_can_diagnostics_and_mailbox_expiry(void)
-{
-    uint8_t query[] = {0x35, 0x6B};
-    uint8_t speed[] = {0xF6, 0, 0, 10, 0, 0, 0x6B};
-    CAN_HandleTypeDef other = {0};
-    ZDT_CAN_Stats_t before, after;
-    can_reset(7000);
-    ZDT_CAN_GetStats(&before);
-    assert(!ZDT_CAN_Send_ExtId(0x100, query, 2));
-    ZDT_CAN_Process(tick);
-    ZDT_CAN_GetStats(&after);
-    assert(after.tx_queued == before.tx_queued + 1 && after.tx_ok == before.tx_ok);
-    assert(sent[0].id == 0x100 && sent[0].bytes[0] == 0x35 && sent[0].bytes[1] == 0x6B);
-    HAL_CAN_TxMailbox0CompleteCallback(&other);
-    HAL_CAN_ErrorCallback(&other);
-    ZDT_CAN_GetStats(&after);
-    assert(after.tx_ok == before.tx_ok && after.error_callbacks == before.error_callbacks);
-    pending = 0;
-    HAL_CAN_TxMailbox0CompleteCallback(&hcan1);
-    HAL_CAN_TxMailbox1CompleteCallback(&hcan1);
-    HAL_CAN_TxMailbox2CompleteCallback(&hcan1);
-    ZDT_CAN_GetStats(&after); assert(after.tx_ok == before.tx_ok + 3);
-    can_error = HAL_CAN_ERROR_ACK | HAL_CAN_ERROR_BOF;
-    HAL_CAN_ErrorCallback(&hcan1);
-    ZDT_CAN_GetStats(&after);
-    assert(after.error_callbacks == before.error_callbacks + 1);
-    assert((after.error_latched & can_error) == can_error);
-    /*
-     * ErrorCode 里的 BOF/EPV 是 |= 累积位，可能只是历史遗留。此时实时 ESR
-     * 干净，就不该锁存 tx_fault —— 否则此后每一次普通错误回调(例如正常的
-     * 仲裁丢失)都会被误判为致命，现场表现为 CAN RECOVERED 反复刷屏。
-     */
-    assert(!ZDT_CAN_ConsumeFault());
-    assert(ZDT_CAN_IsReady());
-    /* 实时 ESR 真的处于 Bus-Off 时才锁存发送故障。 */
-    can_regs.ESR = CAN_ESR_BOFF;
-    HAL_CAN_ErrorCallback(&hcan1);
-    ZDT_CAN_GetStats(&after);
-    assert(after.fatal_error_callbacks == before.fatal_error_callbacks + 1);
-    assert(ZDT_CAN_ConsumeFault());
-    assert(!ZDT_CAN_ConsumeFault());
-    can_regs.ESR = 0;
-    before = after;
-    can_error = HAL_CAN_ERROR_ACK | HAL_CAN_ERROR_TX_ALST0;
-    HAL_CAN_ErrorCallback(&hcan1);
-    ZDT_CAN_GetStats(&after);
-    assert(after.error_callbacks == before.error_callbacks + 1);
-    assert(after.fatal_error_callbacks == before.fatal_error_callbacks);
-    assert(!ZDT_CAN_IsReady()); /* Prior Bus-Off latch survives event consumption. */
-    assert(!ZDT_CAN_ConsumeFault());
-    can_error = 0;
-    /* Empty software queue must not prevent expiry; subtraction must wrap safely. */
-    can_reset(UINT32_MAX - 20U);
-    ZDT_CAN_GetStats(&before);
-    assert(!ZDT_CAN_Send_ExtId(0x100, query, 2)); ZDT_CAN_Process(tick);
-    tick = 29U; ZDT_CAN_Process(tick); assert(pending == 1U);
-    tick = 30U; ZDT_CAN_Process(tick); assert(pending == 0U);
-    HAL_CAN_TxMailbox0AbortCallback(&hcan1);
-    ZDT_CAN_GetStats(&after);
-    assert(after.tx_timeout == before.tx_timeout + 1);
-    assert(after.tx_aborted == before.tx_aborted + 1 && after.tx_ok == before.tx_ok);
-    assert(ZDT_CAN_ConsumeFault());
-    can_reset(8000);
-    assert(!ZDT_CAN_Send_ExtId(0x100, query, 2)); ZDT_CAN_Process(tick);
-    tick += 51;
-    assert(!ZDT_CAN_Send_ExtId(0x100, speed, 7));
-    ZDT_CAN_Process(tick); ZDT_CAN_Process(tick);
-    assert(sent_count == 1); /* Fresh queued motion is discarded with the stalled request. */
-}
-
-static void test_can_stopped_recovery(void)
-{
-    ZDT_CAN_Stats_t before, after;
-    can_reset(10000);
-    can_regs.ESR = 0;
-    /*
-     * 累积 ErrorCode 里的 BOF 只是历史遗留：实时 ESR 干净时不应锁存 tx_fault，
-     * 也不该触发恢复流程（否则空闲期会把 CAN RECOVERED 刷满串口）。
-     */
-    can_error = HAL_CAN_ERROR_ACK | HAL_CAN_ERROR_BOF;
-    HAL_CAN_ErrorCallback(&hcan1);
-    ZDT_CAN_GetStats(&before);
-    assert(ZDT_CAN_IsReady());
-    assert(!ZDT_CAN_RecoverWhenIdle(1));
-
-    /* 实时 ESR 真的处于 Bus-Off 时才锁存发送故障。 */
-    can_regs.ESR = CAN_ESR_BOFF;
-    HAL_CAN_ErrorCallback(&hcan1);
-    ZDT_CAN_GetStats(&before);
-    assert(!ZDT_CAN_IsReady());
-    assert(!ZDT_CAN_RecoverWhenIdle(0)); /* Running or feedback/stop not ready. */
-    tick += 1000;
-    assert(!ZDT_CAN_RecoverWhenIdle(1));
-    tick += 500;
-    assert(!ZDT_CAN_RecoverWhenIdle(1)); /* ESR 仍是 Bus-Off，不允许恢复 */
-
-    can_regs.ESR = 0;                    /* 硬件自动退出 Bus-Off */
-    tick += 500;
-    assert(!ZDT_CAN_RecoverWhenIdle(1)); /* Quiet alone does not prove communication. */
-    HAL_CAN_TxMailbox0CompleteCallback(&hcan1);
-    rx_remaining = 1; ZDT_CAN_RxFIFO0_Handler(&hcan1);
-    tick += 500;
-    assert(ZDT_CAN_RecoverWhenIdle(1));
-    assert(ZDT_CAN_IsReady());
-    assert(ZDT_CAN_ConsumeFault()); /* Recovery does not erase unread history. */
-    ZDT_CAN_GetStats(&after);
-    assert(after.recoveries == before.recoveries + 1);
-    assert(after.error_latched == before.error_latched); /* History survives recovery. */
-    assert(!ZDT_CAN_RecoverWhenIdle(1)); /* No repeated recovery notifications. */
-
-    can_error = HAL_CAN_ERROR_ACK;
-    HAL_CAN_ErrorCallback(&hcan1);
-    assert(!ZDT_CAN_RecoverWhenIdle(1)); /* 纯接收错误不进入恢复流程 */
-    tick += 499;
-    HAL_CAN_ErrorCallback(&hcan1);
-    assert(!ZDT_CAN_RecoverWhenIdle(1));
-    HAL_CAN_TxMailbox0CompleteCallback(&hcan1);
-    rx_remaining = 1; ZDT_CAN_RxFIFO0_Handler(&hcan1);
-    tick += 499; assert(!ZDT_CAN_RecoverWhenIdle(1));
-    assert(!ZDT_CAN_RecoverWhenIdle(0));
-    tick++; assert(!ZDT_CAN_RecoverWhenIdle(1));
-    can_regs.ESR = CAN_ESR_BOFF;
-    tick += 500; assert(!ZDT_CAN_RecoverWhenIdle(1));
-    assert(!ZDT_CAN_IsReady());
-    can_regs.ESR = 1UL << 16; /* TEC is nonzero even without BOFF. */
-    assert(!ZDT_CAN_RecoverWhenIdle(1));
-    can_regs.ESR = 0;
-    can_state = 0;
-    assert(!ZDT_CAN_RecoverWhenIdle(1));
-    can_state = HAL_CAN_STATE_LISTENING;
-    can_error = 0x00200000U; /* HAL parameter errors need a code/configuration fix. */
-    assert(!ZDT_CAN_RecoverWhenIdle(1));
-
-    /* 真实的 Error Passive 才需要恢复；验证 tick 回绕后的观察窗口。 */
-    can_regs.ESR = CAN_ESR_EPVF;
-    HAL_CAN_ErrorCallback(&hcan1);
-    can_regs.ESR = 0;
-    assert(!ZDT_CAN_IsReady());
-    can_error = HAL_CAN_ERROR_ACK;
-    tick = UINT32_MAX - 100U;
-    assert(!ZDT_CAN_RecoverWhenIdle(1));
-    HAL_CAN_TxMailbox0CompleteCallback(&hcan1);
-    rx_remaining = 1; ZDT_CAN_RxFIFO0_Handler(&hcan1);
-    tick = 399U; assert(ZDT_CAN_RecoverWhenIdle(1));
-    assert(ZDT_CAN_IsReady());
-}
 
 static void test_uart_dma_ownership_and_priority(void)
 {
@@ -451,47 +246,6 @@ static void test_uart_burst_and_errors(void)
     HostUartTx_Process(100); assert(HostUartTx_ConsumeFault()); uart_reset();
 }
 
-static void test_motor_feedback_and_chassis(void)
-{
-    MotorFeedback samples[4];
-    uint8_t bad[] = {0x35, 0, 0, 20, 0};
-    unsigned i;
-    can_reset(4900); ZDT_Emm_InitAll(); auto_complete = 1U;
-    assert(Mecanum_SetRequiredMotorMask(0x01U));
-    assert(Mecanum_GetRequiredMotorMask() == 0x01U);
-    assert(!Mecanum_SetRequiredMotorMask(0x00U));
-    assert(!Mecanum_SetRequiredMotorMask(0x10U));
-    assert(Mecanum_GetRequiredMotorMask() == 0x01U);
-    assert(!StopAllMotors());
-    assert(sent_count == 1U && sent[0].id == 0x100U);
-    can_reset(5000); ZDT_Emm_InitAll();
-    assert(Mecanum_SetRequiredMotorMask(0x0FU));
-    assert(ZDT_Emm_SetSpeedByID(1, 10) == 4U);
-    for (i = 1; i <= 4; ++i) driver_feedback(i, 0);
-    ZDT_Emm_GetFeedback(samples); assert(MotorFeedback_FreshMask(samples, tick) == 15);
-    ZDT_Emm_RxHandler(0x100, bad, sizeof(bad));
-    bad[4] = 0x6B; ZDT_Emm_RxHandler(0x101, bad, sizeof(bad));
-    ZDT_Emm_RxHandler(0x100, bad, 4);
-    ZDT_Emm_RxHandler(0x10100, bad, sizeof(bad)); /* Must not alias motor 1. */
-    ZDT_Emm_GetFeedback(samples); assert(samples[0].sequence == 1);
-    assert(!SetAllMotorsSpeed(1.6f, .8f, -.4f, -.8f)); near(Mecanum_GetAppliedScale(), .5f);
-    ZDT_Emm_GetFeedback(samples); assert(MotorFeedback_FreshMask(samples, tick) == 15);
-    (void)motors[0].actual_speed; (void)ZDT_Emm_EnableByID(1, 1U);
-    ZDT_Emm_GetFeedback(samples); assert(samples[0].sequence == 1); /* Lookup must not reset feedback. */
-    assert(!StopAllMotors()); assert(ZDT_CAN_StopPending());
-    pending = 0; ZDT_CAN_Process(tick); pending = 0; Mecanum_ProcessFeedback(tick);
-    assert(Mecanum_GetStopStatus().state == MOTOR_STOP_WAIT_FEEDBACK);
-    tick += 40; for (i = 1; i <= 4; ++i) driver_feedback(i, 0);
-    Mecanum_ProcessFeedback(tick); assert(Mecanum_GetStopStatus().state == MOTOR_STOP_WAIT_FEEDBACK);
-    tick += 40; for (i = 1; i <= 4; ++i) driver_feedback(i, 0);
-    Mecanum_ProcessFeedback(tick); assert(Mecanum_GetStopStatus().state == MOTOR_STOP_CONFIRMED);
-    assert(!SetAllMotorsSpeed(.1f, .1f, .1f, .1f));
-    Mecanum_ProcessFeedback(tick); assert(Mecanum_GetStopStatus().state == MOTOR_STOP_IDLE);
-    tick += 301; assert(!Mecanum_FeedbackReady(15));
-    assert(SetAllMotorsSpeed(.1f, .1f, .1f, .1f) == 4); near(Mecanum_GetAppliedScale(), 0);
-    assert(Mecanum_ConsumeCanTxFault());
-    assert(ZDT_Emm_SetSpeedByID(1, NAN) == 3);
-}
 
 extern uint8_t ops9_rx_byte;
 static void ops_byte(uint8_t ch) { ops9_rx_byte = ch; OPS9_UART_RxCpltCallback(&huart2); }
@@ -535,190 +289,196 @@ static void test_runtime_deadline(void)
     assert(ControlRuntime_GetStats().fault);
 }
 
-/*
- * 回归：一次历史发送故障不能让 ZDT_CAN_IsReady() 永久为假。
- * 现场表现为 TXOK/RX 持续增长、ESR/ErrorCode/TEC/REC 全为 0 的健康总线上，
- * MOTOR RUN 一直被拒绝并打印 CAN NOT READY，且刚下发的速度会被立即停车。
- */
-static void test_can_fault_auto_recovery_and_clear(void)
+static void tx_complete(void)
 {
-    ZDT_CAN_Stats_t before, after;
-    can_reset(20000U);
-    ZDT_CAN_RaiseFault();
-    ZDT_CAN_GetStats(&before);
-    assert(ZDT_CAN_ConsumeFault());
-    assert(!ZDT_CAN_ConsumeFault());
-    assert(ZDT_CAN_HasFault() && !ZDT_CAN_IsReady());
-    assert(ZDT_CAN_HardwareReady());
-    ZDT_CAN_Process(tick);
-    HAL_CAN_TxMailbox0CompleteCallback(&hcan1);
-    tick += 100U; ZDT_CAN_Process(tick);
-    tick += 100U; ZDT_CAN_Process(tick);
-    assert(!ZDT_CAN_IsReady()); /* TXOK + 100ms cannot grant permission. */
-    assert(!ZDT_CAN_RecoverWhenIdle(0U));
-    assert(!ZDT_CAN_RecoverWhenIdle(1U));
-    HAL_CAN_TxMailbox0CompleteCallback(&hcan1);
-    rx_remaining = 1U; ZDT_CAN_RxFIFO0_Handler(&hcan1);
-    tick += 499U; assert(!ZDT_CAN_RecoverWhenIdle(1U));
-    ZDT_CAN_RaiseFault(); /* A new generation invalidates old progress. */
-    (void)ZDT_CAN_ConsumeFault();
-    tick++; assert(!ZDT_CAN_RecoverWhenIdle(1U));
-    tick += 500U; assert(!ZDT_CAN_RecoverWhenIdle(1U));
-    HAL_CAN_TxMailbox0CompleteCallback(&hcan1);
-    rx_remaining = 1U; ZDT_CAN_RxFIFO0_Handler(&hcan1);
-    assert(ZDT_CAN_RecoverWhenIdle(1U));
-    assert(ZDT_CAN_IsReady());
-    ZDT_CAN_GetStats(&after);
-    assert(after.fault_generation == before.fault_generation + 1U);
-    assert(after.recoveries == before.recoveries + 1U);
-    assert(after.auto_recoveries == before.auto_recoveries);
-    can_regs.ESR = CAN_ESR_EWGF;
-    assert(!ZDT_CAN_IsReady());
-    can_reset(23000U);
-}
-
-/*
- * P0-A：禁止注册电平式 EWGIE/EPVIE，否则 error passive 会中断风暴。
- * P0-B：Abort 清不掉 TME 时，FREE=0 且 TXOK 停增必须强制 Stop/Start 恢复。
- */
-static void test_can_no_level_irq_and_mailbox_stall_recovery(void)
-{
-    uint8_t query[] = {0x35, 0x6B};
-    ZDT_CAN_Stats_t before, after;
-    uint32_t stops_before;
-
-    can_reset(30000);
-    ZDT_CAN_ConfigFilter();
-    assert((last_notify_mask & CAN_IT_ERROR_WARNING) == 0U);
-    assert((last_notify_mask & CAN_IT_ERROR_PASSIVE) == 0U);
-    assert((last_notify_mask & CAN_IT_ERROR) == 0U);
-    assert((last_notify_mask & CAN_IT_LAST_ERROR_CODE) == 0U);
-    assert((last_notify_mask & CAN_IT_BUSOFF) == 0U);
-    assert((last_notify_mask & CAN_IT_RX_FIFO0_MSG_PENDING) != 0U);
-    assert((last_notify_mask & CAN_IT_TX_MAILBOX_EMPTY) != 0U);
-
-    /* ESR 轮询：EPVF/BOFF 时锁存发送故障，不依赖错误中断。 */
-    can_regs.ESR = CAN_ESR_EPVF;
-    ZDT_CAN_Process(tick);
-    assert(ZDT_CAN_ConsumeFault());
-    can_regs.ESR = 0U;
-
-    /* Abort 失效 + 有发送企图但 TXOK 永不增加：150ms 后强制恢复。
-     * 中途故意让 FREE 短暂弹起（模拟超时-Abort 震荡）+ BeginStop（停车重试），
-     * 都不得清掉卡死计时。 */
-    can_reset(31000);
-    fail_abort = 1U;
-    pending = 7U;
-    ZDT_CAN_GetStats(&before);
-    stops_before = can_stop_count;
-    ZDT_CAN_Process(tick);                 /* FREE=0，开始计时 */
-    tick += 40U;
-    pending = 0U; ZDT_CAN_Process(tick);   /* FREE=3，不应复位 */
-    pending = 7U;
-    tick += 40U; ZDT_CAN_Process(tick);
-    ZDT_CAN_BeginStop();
-    pending = 7U;
-    assert(can_stop_count == stops_before);
-    tick += 70U; ZDT_CAN_Process(tick);    /* 累计 150ms */
-    assert(can_stop_count == stops_before + 1U);
-    assert(pending == 0U);
-    ZDT_CAN_GetStats(&after);
-    assert(after.stall_recoveries == before.stall_recoveries + 1U);
-
-    /* 500ms 内再次卡死：只锁存故障，不得再 Stop/Start（防止打断总线）。 */
-    pending = 7U;
-    stops_before = can_stop_count;
-    tick += 20U; ZDT_CAN_Process(tick);    /* 重新武装 */
-    tick += 160U; ZDT_CAN_Process(tick);   /* 到阈值，但未过冷却 */
-    assert(can_stop_count == stops_before);
-    assert(ZDT_CAN_ConsumeFault());
-    assert(pending == 7U);                 /* 冷却期内不拆邮箱 */
-
-    /* 冷却结束后可以再次强制恢复。 */
-    tick += 400U;
-    ZDT_CAN_Process(tick);
-    tick += 20U; ZDT_CAN_Process(tick);
-    tick += 160U; ZDT_CAN_Process(tick);
-    assert(can_stop_count == stops_before + 1U);
-    assert(pending == 0U);
-    fail_abort = 0U;
-    ZDT_CAN_GetStats(&after);
-    /* 首次完整恢复 + 冷却后再次恢复；冷却期内那次只锁存不计完整恢复。 */
-    assert(after.stall_recoveries == before.stall_recoveries + 2U);
-    assert(ZDT_CAN_ConsumeFault());
-    fail_abort = 0U;
-
-    /* FREE>0 时不得触发卡死恢复。 */
-    can_reset(32000);
+    assert(pending != 0U);
+    if (pending & 1U) HAL_CAN_TxMailbox0CompleteCallback(&hcan1);
+    if (pending & 2U) HAL_CAN_TxMailbox1CompleteCallback(&hcan1);
+    if (pending & 4U) HAL_CAN_TxMailbox2CompleteCallback(&hcan1);
     pending = 0U;
-    assert(!ZDT_CAN_Send_ExtId(0x100, query, 2));
-    stops_before = can_stop_count;
-    ZDT_CAN_GetStats(&before);
-    for (tick = 32000U; tick < 32500U; tick += 50U) ZDT_CAN_Process(tick);
-    assert(can_stop_count == stops_before);
-    ZDT_CAN_GetStats(&after);
-    assert(after.stall_recoveries == before.stall_recoveries);
+}
+static void pump_stops(void)
+{
+    unsigned i;
+    for (i = 0U; i < 4U; ++i) {
+        if (!pending) ZDT_CAN_Process(tick);
+        assert(pending);
+        assert(sent[sent_count - 1U].bytes[0] == 0xFEU);
+        tx_complete(); tick++; ZDT_CAN_Process(tick);
+    }
+}
+static void test_command_only_transport(void)
+{
+    MotorFeedback samples[4];
+    unsigned i;
+    uint8_t query[2] = {0x35U, 0x6BU};
+    ZDT_CAN_Stats_t stats;
+    can_reset(1000U); ZDT_Emm_InitAll();
+    ZDT_Emm_SetProtocol(ZDT_PROTOCOL_EMM);
+    assert(!ZDT_Emm_SetSpeedByID(1U, 10.0f));
+    assert(!ZDT_Emm_SetSpeedByID(1U, -40.0f));
+    ZDT_CAN_Process(tick);
+    assert(sent_count == 1U && sent[0].bytes[1] == 1U && sent[0].bytes[3] == 40U);
+    assert(pending == 1U); /* Exactly one in flight. */
+    ZDT_CAN_Process(tick); assert(sent_count == 1U);
+    tx_complete(); ZDT_CAN_Process(++tick);
+    ZDT_Emm_GetFeedback(samples); assert(!MotorFeedback_FreshMask(samples, tick));
+    assert(!StopAllMotors()); pump_stops(); Mecanum_ProcessFeedback(tick);
+    assert(Mecanum_GetStopStatus().state == MOTOR_STOP_SENT);
+    assert(ZDT_CAN_StopSent(15U));
+    /* No fabricated speed feedback or physical stop confirmation. */
+    assert(!samples[0].valid);
+
+    can_reset(2000U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_SetSpeedByID(1U, 80.0f)); ZDT_CAN_Process(tick);
+    fail_abort = 1U; /* Abort request accepted; hardware is still busy. */
+    assert(!StopAllMotors()); ZDT_CAN_Process(++tick);
+    assert(sent_count == 1U); /* STOP waits for old mailbox cancellation. */
+    pending = 0U; fail_abort = 0U; pump_stops();
+    for (i = 1U; i < sent_count; ++i) assert(sent[i].bytes[0] == 0xFEU);
+
+    can_reset(3000U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_SetSpeedByID(1U, 70.0f)); ZDT_CAN_Process(tick);
+    tick += 50U; ZDT_CAN_Process(tick); assert(ZDT_CAN_HasFault());
+    assert(!ZDT_CAN_RecoverWhenIdle(1U));
+    assert(ZDT_Emm_SetSpeedByID(1U, 90.0f) == 4U);
+    assert(!StopAllMotors()); pump_stops();
+    assert(!ZDT_CAN_RecoverWhenIdle(0U));
+    assert(ZDT_CAN_RecoverWhenIdle(1U)); /* No motor reply required. */
+    assert(ZDT_CAN_IsReady());
+    ZDT_CAN_Process(++tick);
+    for (i = 1U; i < sent_count; ++i) assert(sent[i].bytes[0] == 0xFEU);
+    assert(!ZDT_Emm_SetSpeedByID(1U, 33.0f)); ZDT_CAN_Process(tick);
+    assert(sent[sent_count - 1U].bytes[3] == 33U);
+    tx_complete(); ZDT_CAN_Process(++tick);
+
+    /* Late motor power: repeated failed STOP attempts are retained, rotate,
+     * and eventually complete without RX; no old motion is replayed. */
+    can_reset(4000U); ZDT_Emm_InitAll(); assert(!StopAllMotors());
+    tick += 50U; ZDT_CAN_Process(tick);
+    tick++; ZDT_CAN_Process(tick); assert(pending);
+    assert(sent[1].id != sent[0].id);
+    tx_complete(); ZDT_CAN_Process(++tick);
+    tx_complete(); ZDT_CAN_Process(++tick);
+    tx_complete(); ZDT_CAN_Process(++tick);
+    assert(!ZDT_CAN_StopSent(15U));
+    tick += 100U; ZDT_CAN_Process(tick); assert(pending);
+    tx_complete(); ZDT_CAN_Process(++tick);
+    assert(ZDT_CAN_StopSent(15U) && ZDT_CAN_RecoverWhenIdle(1U));
+
+    /* Latest enable/disable survives retry, 5ms settling precedes speed. */
+    can_reset(5000U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_EnableByID(1U, 1U));
+    assert(!ZDT_Emm_SetSpeedByID(1U, 22.0f)); ZDT_CAN_Process(tick);
+    assert(sent[0].bytes[0] == 0xF3U);
+    tx_complete(); ZDT_CAN_Process(++tick); assert(sent_count == 1U);
+    tick += 5U; ZDT_CAN_Process(tick); assert(sent_count == 2U);
+    tx_complete(); ZDT_CAN_Process(++tick);
+    assert(!ZDT_Emm_EnableByID(1U, 0U)); ZDT_CAN_Process(tick);
+    tx_complete(); ZDT_CAN_Process(++tick); ZDT_Emm_RefreshEnables();
+    ZDT_CAN_Process(++tick); assert(sent_count == 3U);
+
+    can_reset(6000U); ZDT_Emm_InitAll();
+    for (i = 0U; i < 8U; ++i) assert(!ZDT_CAN_Send_ExtId(0x100U, query, 2U));
+    assert(ZDT_CAN_Send_ExtId(0x100U, query, 2U) == 1U);
+    assert(!ZDT_CAN_HasFault()); /* Diagnostic congestion is not a motion fault. */
+    assert(ZDT_CAN_Send_ExtId(0x101U, query, 2U) == 3U);
+    ZDT_CAN_RxFIFO0_Handler(&hcan1);
+    ZDT_CAN_GetStats(&stats); assert(stats.rx_count == 0U);
+
+    can_reset(0xFFFFFFE0U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_SetSpeedByID(1U, 20.0f)); ZDT_CAN_Process(tick);
+    tick = 17U; ZDT_CAN_Process(tick); assert(pending);
+    tick = 18U; ZDT_CAN_Process(tick); assert(!pending && ZDT_CAN_HasFault());
 }
 
-static void test_can_recovery_preserves_stop_and_errors(void)
+
+static void test_transport_repair_and_formats(void)
 {
-    uint8_t stop[] = {0xF6, 0, 0, 0, 0, 0, 0x6B};
-    const uint32_t bus_errors[] = {CAN_ESR_EWGF, CAN_ESR_EPVF, CAN_ESR_BOFF};
-    ZDT_CAN_Stats_t before, after;
-    uint32_t stops_before;
     unsigned i;
+    ZDT_CAN_Stats_t before, after;
+    uint8_t bad[5] = {0x35, 0, 0, 10, 0};
+    MotorFeedback samples[4];
+    can_reset(10000U); ZDT_Emm_InitAll();
+    ZDT_Emm_SetProtocol(ZDT_PROTOCOL_X);
+    assert(!ZDT_Emm_SetSpeedByID(2U, -123.4f)); ZDT_CAN_Process(tick);
+    assert(sent[0].id == 0x200U && sent[0].bytes[1] == 1U);
+    assert(sent[0].bytes[2] == 1U && sent[0].bytes[3] == 244U);
+    assert(sent[0].bytes[4] == 4U && sent[0].bytes[5] == 210U && sent[0].bytes[7] == 0x6BU);
+    tx_complete(); ZDT_CAN_Process(++tick);
+    ZDT_Emm_RxHandler(0x200U, bad, 5U);
+    ZDT_Emm_GetFeedback(samples); assert(!samples[1].valid);
+    bad[4] = 0x6B; ZDT_Emm_RxHandler(0x201U, bad, 5U);
+    ZDT_Emm_GetFeedback(samples); assert(!samples[1].valid);
+    ZDT_Emm_RxHandler(0x200U, bad, 5U);
+    ZDT_Emm_GetFeedback(samples); assert(samples[1].valid); near(samples[1].rpm, 1.0f);
 
-    for (i = 0; i < 3U; ++i) {
-        can_reset(40000U + i * 1000U);
-        fail_abort = 1U; pending = 7U; can_regs.ESR = bus_errors[i];
-        stops_before = can_stop_count;
-        ZDT_CAN_GetStats(&before);
-        ZDT_CAN_Process(tick);
-        tick += 600U; ZDT_CAN_Process(tick);
-        ZDT_CAN_GetStats(&after);
-        assert(!ZDT_CAN_IsReady());
-        assert(can_stop_count == stops_before);
-        assert(after.stall_recoveries == before.stall_recoveries);
+    can_reset(11000U); ZDT_Emm_InitAll(); ZDT_Emm_SetProtocol(ZDT_PROTOCOL_EMM);
+    assert(!SetAllMotorsSpeed(0.1f, 0.0f, 0.2f, 0.0f));
+    for (i = 0U; i < 4U; ++i) {
+        ZDT_CAN_Process(tick); assert(pending);
+        tx_complete(); tick++;
     }
+    ZDT_CAN_Process(tick); assert(sent_count == 4U);
+    assert(!Mecanum_FeedbackReady(15U));
+    assert(!SetAllMotorsSpeed(2.0f, 1.0f, 0.0f, -2.0f)); near(Mecanum_GetAppliedScale(), 0.4f);
+    assert(SetAllMotorsSpeed(NAN, 0.0f, 0.0f, 0.0f) == 4U);
+    pump_stops();
 
-    can_reset(44000U);
-    pending = 7U; fail_abort = 1U;
-    assert(!ZDT_CAN_SendStop(0x400, stop, sizeof(stop)));
-    ZDT_CAN_Process(tick);
-    tick += 150U; ZDT_CAN_Process(tick);
-    assert(sent_count == 1U && sent[0].id == 0x400U);
-    assert(sent[0].bytes[0] == 0xF6U && ZDT_CAN_StopPending());
-
-    can_reset(46000U);
-    pending = 7U; fail_abort = fail_can_stop = 1U;
+    /* Abort accepted but stuck: restart steps must preserve STOP and reject motion. */
+    can_reset(12000U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_SetSpeedByID(1U, 60.0f)); ZDT_CAN_Process(tick);
+    fail_abort = 1U; tick += 50U; ZDT_CAN_Process(tick);
+    assert(ZDT_CAN_HasFault()); assert(!StopAllMotors());
     ZDT_CAN_GetStats(&before);
-    ZDT_CAN_Process(tick);
-    tick += 150U; ZDT_CAN_Process(tick);
-    ZDT_CAN_GetStats(&after);
-    assert(can_error & HAL_CAN_ERROR_TIMEOUT);
-    assert(after.error_latched & HAL_CAN_ERROR_TIMEOUT);
-    assert(after.stall_recoveries == before.stall_recoveries);
+    tick += 450U; ZDT_CAN_Process(tick); /* Stop phase */
     assert(!ZDT_CAN_IsReady());
-    fail_can_stop = fail_abort = 0U;
-    can_reset(48000U);
+    ZDT_CAN_Process(++tick); /* Start/notifications phase */
+    ZDT_CAN_GetStats(&after); assert(after.stall_recoveries == before.stall_recoveries + 1U);
+    fail_abort = 0U; pump_stops(); assert(ZDT_CAN_RecoverWhenIdle(1U));
+    for (i = 1U; i < sent_count; ++i) assert(sent[i].bytes[0] == 0xFEU);
+
+    /* Start failure must stay faulted, then retry from HAL Init, not Stop(READY). */
+    can_reset(14000U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_SetSpeedByID(1U, 60.0f)); ZDT_CAN_Process(tick);
+    fail_abort = 1U; tick += 50U; ZDT_CAN_Process(tick);
+    assert(!StopAllMotors()); tick += 450U; ZDT_CAN_Process(tick);
+    fail_can_start = 1U; ZDT_CAN_Process(++tick); assert(!ZDT_CAN_IsReady());
+    fail_can_start = fail_abort = 0U; tick += 500U; ZDT_CAN_Process(tick);
+    ZDT_CAN_Process(++tick); pump_stops(); assert(ZDT_CAN_RecoverWhenIdle(1U));
+
+    /* Notification failure is not a successful restart; retry must restore it. */
+    can_reset(15000U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_SetSpeedByID(1U, 60.0f)); ZDT_CAN_Process(tick);
+    fail_abort = 1U; tick += 50U; ZDT_CAN_Process(tick);
+    assert(!StopAllMotors()); tick += 450U; ZDT_CAN_Process(tick);
+    fail_notify = 1U; ZDT_CAN_Process(++tick); assert(!ZDT_CAN_IsReady());
+    fail_notify = fail_abort = 0U; tick += 500U; ZDT_CAN_Process(tick);
+    ZDT_CAN_Process(++tick); pump_stops(); assert(ZDT_CAN_RecoverWhenIdle(1U));
+
+    can_reset(16000U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_SetSpeedByID(1U, 88.0f)); ZDT_CAN_Process(tick);
+    can_regs.ESR = CAN_ESR_BOFF; ZDT_CAN_GetStats(&before);
+    ZDT_CAN_Process(++tick); assert(!pending); /* cancel before ABOM recovery */
+    assert(!StopAllMotors()); tick += 1000U; ZDT_CAN_Process(tick);
+    assert(!ZDT_CAN_IsReady()); ZDT_CAN_GetStats(&after);
+    assert(after.stall_recoveries == before.stall_recoveries);
+    can_regs.ESR = CAN_ESR_EPVF; /* Passive can still transmit; don't restart repeatedly. */
+    pump_stops(); assert(ZDT_CAN_RecoverWhenIdle(1U));
+    ZDT_CAN_ConfigFilter();
+    assert(last_notify_mask == (CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_TX_MAILBOX_EMPTY));
 }
 
 int main(void)
 {
     test_pid_dt_and_limits();
+    test_command_only_transport();
+    test_transport_repair_and_formats();
     test_stop_confirmation();
-    test_can_queue_and_stop();
-    test_can_timeout_enable_and_rx_budget();
-    test_can_diagnostics_and_mailbox_expiry();
-    test_can_stopped_recovery();
-    test_can_fault_auto_recovery_and_clear();
-    test_can_no_level_irq_and_mailbox_stall_recovery();
-    test_can_recovery_preserves_stop_and_errors();
     test_uart_dma_ownership_and_priority();
     test_uart_burst_and_errors();
-    test_motor_feedback_and_chassis();
     test_ops_snapshot_and_invalid_frame();
     test_runtime_deadline();
-    puts("control layer: 14 test groups passed");
+    puts("control layer: 2 CAN groups and 6 control groups passed");
     return 0;
 }

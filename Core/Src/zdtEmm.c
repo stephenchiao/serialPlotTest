@@ -13,7 +13,7 @@
 
 ZDT_Motor_t motors[4];
 static MotorFeedback feedback[4];
-static uint8_t sending_stop;
+static uint8_t enable_requested[4];
 static uint32_t motion_generation;
 uint32_t ZDT_Emm_MotionGeneration(void) { return motion_generation; }
 
@@ -38,20 +38,23 @@ static float ClampRpm(float rpm)
     return rpm;
 }
 
-/*
- * 统一下发一帧命令。停车序列期间改走 stops 队列：它优先发送，且不会被随后
- * 到达的新速度覆盖；其余情况走高优先命令队列(读查询)或每电机速度槽。
- */
-static uint8_t EmmEmit(uint32_t ext_id, uint8_t *data, uint8_t length)
+/* Publish only accepted targets. Failed commands do not create a motion generation. */
+static uint8_t EmitSpeed(uint8_t id, float rpm, uint8_t *data, uint8_t length)
 {
-    return sending_stop ? ZDT_CAN_SendStop(ext_id, data, length)
-                        : ZDT_CAN_Send_ExtId(ext_id, data, length);
+    uint8_t result = ZDT_CAN_Send_ExtId((uint32_t)id << 8, data, length);
+    if (result == 0U) {
+        motors[id - 1U].target_speed = rpm;
+        if (rpm != 0.0f) motion_generation++;
+    }
+    return result;
 }
 
 void ZDT_Emm_InitAll(void)
 {
     uint8_t i;
     memset(feedback, 0, sizeof(feedback));
+    memset(enable_requested, 0, sizeof(enable_requested));
+    event_head = event_tail = 0U;
     for (i = 0U; i < 4U; i++) {
         motors[i].node_id = i + 1U;
         motors[i].target_speed = 0.0f;
@@ -76,18 +79,11 @@ uint8_t ZDT_Emm_SetSpeedByID(uint8_t id, float speed_rpm)
 {
     uint8_t tx_data[8];
     uint8_t dir;
-    uint8_t index;
     float abs_rpm;
 
     if (id < 1U || id > 4U) return 3U;
 
     if (!isfinite(speed_rpm)) return 3U;
-    if (speed_rpm != 0.0f) {
-        MotorFeedback snapshot[4];
-        ZDT_Emm_GetFeedback(snapshot);
-        if (!(MotorFeedback_FreshMask(snapshot, HAL_GetTick()) & (1U << (id - 1U)))) return 4U;
-        motion_generation++;
-    }
     speed_rpm = ClampRpm(speed_rpm);
     dir = (speed_rpm < 0.0f) ? 1U : 0U;
     abs_rpm = (speed_rpm < 0.0f) ? -speed_rpm : speed_rpm;
@@ -105,9 +101,7 @@ uint8_t ZDT_Emm_SetSpeedByID(uint8_t id, float speed_rpm)
         tx_data[5] = (uint8_t)speed_x10;
         tx_data[6] = 0x00; /* execute immediately */
         tx_data[7] = 0x6B;
-        index = MotorIndexFromId(id);
-        if (index != 0xFFU) motors[index].target_speed = speed_rpm;
-        return EmmEmit((uint32_t)id << 8, tx_data, 8U);
+        return EmitSpeed(id, speed_rpm, tx_data, 8U);
     }
 
     /* Emm 固件：功能码 方向 速度(2) 加速度档位 同步标志 校验 */
@@ -119,9 +113,7 @@ uint8_t ZDT_Emm_SetSpeedByID(uint8_t id, float speed_rpm)
         tx_data[5] = 0x00; /* execute immediately */
         tx_data[6] = 0x6B;
     }
-    index = MotorIndexFromId(id);
-    if (index != 0xFFU) motors[index].target_speed = speed_rpm;
-    return EmmEmit((uint32_t)id << 8, tx_data, 7U);
+    return EmitSpeed(id, speed_rpm, tx_data, 7U);
 }
 
 uint8_t ZDT_Emm_ReadSpeedByID(uint8_t id)
@@ -155,7 +147,10 @@ uint8_t ZDT_Emm_EnableByID(uint8_t id, uint8_t enable)
     result = ZDT_CAN_Send_ExtId(((uint32_t)id << 8), tx_data, 5U);
 
     index = MotorIndexFromId(id);
-    if (result == 0U && index != 0xFFU) motors[index].enabled = enable ? 1U : 0U;
+    if (result == 0U && index != 0xFFU) {
+        enable_requested[index] = enable ? 1U : 0U;
+        motors[index].enabled = enable_requested[index]; /* requested, not acknowledged */
+    }
     return result;
 }
 
@@ -226,13 +221,21 @@ uint8_t ZDT_Emm_StopMask(uint8_t motor_mask)
     motor_mask &= 0x0FU;
     if (motor_mask == 0U) return 3U;
     ZDT_CAN_BeginStop();
-    sending_stop = 1U;
     for (id = 1U; id <= 4U; ++id) {
         if (motor_mask & (uint8_t)(1U << (id - 1U))) {
-            result |= ZDT_Emm_SetSpeedByID(id, 0.0f);
+            uint8_t stop[4] = {0xFE, 0x98, 0x00, 0x6B};
+            motors[id - 1U].target_speed = 0.0f;
+            result |= ZDT_CAN_SendStop((uint32_t)id << 8, stop, sizeof(stop));
         }
     }
-    sending_stop = 0U;
     ZDT_CAN_Process(HAL_GetTick());
     return result;
+}
+
+/* Idle only, after STOP delivery. Explicit MOTOR DIS must never be undone. */
+void ZDT_Emm_RefreshEnables(void)
+{
+    uint8_t id;
+    for (id = 1U; id <= 4U; ++id)
+        if (enable_requested[id - 1U]) (void)ZDT_Emm_EnableByID(id, 1U);
 }

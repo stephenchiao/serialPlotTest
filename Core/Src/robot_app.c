@@ -65,7 +65,6 @@
 #define TELEMETRY_MASK_WHEEL         0x01U
 #define TELEMETRY_MASK_POSE          0x02U
 #define TELEMETRY_MASK_BOTH          (TELEMETRY_MASK_WHEEL | TELEMETRY_MASK_POSE)
-#define MOTOR_FEEDBACK_POLL_MS       10U
 #define HOST_WAIT_TIMEOUT_MS         60000U
 #define G6220_CAN_ID                 0x01U
 #define G6220_MASTER_ID              0x00U
@@ -99,8 +98,7 @@ static uint16_t rpi_binary_fault_reason = RPI_FAULT_UNSPECIFIED;
 
 typedef enum {
     ROBOT_MODE_WORK = 0,
-    ROBOT_MODE_TUNE,
-    ROBOT_MODE_PLOT
+    ROBOT_MODE_TUNE
 } RobotMode_t;
 
 typedef enum {
@@ -177,8 +175,6 @@ static uint32_t telemetry_last_tick = 0U;
 static uint32_t binary_stats_last_tick = 0U;
 static uint32_t telemetry_tx_ok = 0U;
 static uint32_t telemetry_tx_error = 0U;
-static uint8_t motor_feedback_poll_id = 1U;
-static uint32_t motor_feedback_poll_tick = 0U;
 static volatile uint32_t host_uart_tx_ok = 0U;
 static volatile uint32_t host_uart_tx_error = 0U;
 static DM_G6220_Motor_t g6220_motor;
@@ -193,7 +189,6 @@ static void Host_PrintHelp(void);
 static void Ops_PrintStatus(void);
 static void Pose_ProcessControl(uint32_t now);
 static void Telemetry_Process(uint32_t now);
-static void Motor_ProcessFeedbackPolling(uint32_t now);
 static void ChassisSafety_Process(uint32_t now);
 static const char *RobotMode_Name(RobotMode_t mode);
 static DM_G6220_Result_t G6220_SetEnabled(uint8_t enable);
@@ -233,7 +228,6 @@ static uint8_t Motor_IsValidId(unsigned int id)
 static const char *RobotMode_Name(RobotMode_t mode)
 {
     if (mode == ROBOT_MODE_TUNE) return "TUNE";
-    if (mode == ROBOT_MODE_PLOT) return "PLOT";
     return "WORK";
 }
 
@@ -313,10 +307,10 @@ static uint8_t HostLink_ProcessCommand(const char *command)
     if (strcmp(command, "MOTOR STOP STATUS") == 0) {
         MotorStopMonitor stop = Mecanum_GetStopStatus();
         uint8_t mask = Mecanum_GetRequiredMotorMask();
-        printf("# MOTOR STOP STATE=%s MASK=0x%02X FRESH=%u ELAPSED_MS=%lu\r\n",
+        printf("# MOTOR STOP STATE=%s MASK=0x%02X FRESH=%u EVIDENCE=CAN_TX_ONLY ELAPSED_MS=%lu\r\n",
                MotorStop_Name(stop.state), mask, Mecanum_FeedbackReady(mask),
                (unsigned long)(stop.state == MOTOR_STOP_IDLE ? 0U :
-                               (stop.state == MOTOR_STOP_CONFIRMED ?
+                               (stop.state == MOTOR_STOP_SENT ?
                                 stop.confirmed_tick - stop.requested_tick : HAL_GetTick() - stop.requested_tick)));
         return 1U;
     }
@@ -413,7 +407,6 @@ static void Robot_SetMode(RobotMode_t mode)
             (void)Mecanum_SetRequiredMotorMask(0x0FU);
             (void)StopAllMotors();
         }
-        if (mode == ROBOT_MODE_PLOT) telemetry_mask = TELEMETRY_MASK_BOTH;
         if (mode == ROBOT_MODE_WORK) {
             (void)G6220_SetEnabled(1U);
         }
@@ -430,10 +423,7 @@ static void Robot_SetMode(RobotMode_t mode)
     LLM_TunerResetSession();
     current_robot_mode = mode;
 
-    if (mode == ROBOT_MODE_PLOT) {
-        telemetry_mask = TELEMETRY_MASK_BOTH;
-        telemetry_last_tick = HAL_GetTick();
-    } else if (mode == ROBOT_MODE_WORK) {
+    if (mode == ROBOT_MODE_WORK) {
         (void)G6220_SetEnabled(1U);
     }
 
@@ -521,7 +511,6 @@ static void ChassisSafety_Process(uint32_t now)
     uint8_t needs_ops;
     uint8_t needs_host;
     uint8_t can_tx_fault;
-    uint8_t required_mask;
 
     (void)Mecanum_ConsumeCanTxFault(); /* Notification only. */
     can_tx_fault = ZDT_CAN_HasFault();
@@ -532,42 +521,6 @@ static void ChassisSafety_Process(uint32_t now)
         return;
     }
     if (ControlRuntime_GetStats().fault) { ChassisSafety_Stop(motion, "CONTROL OVERRUN"); return; }
-    /*
-     * 单电机台架测试只看被测试电机；TUNE 轮次遵循 MOTOR MASK（PID 调参在
-     * MASK=0x0F 时等价于原来的四轮要求）；POSE 只在整车上运行。
-     */
-    if (motion == CHASSIS_MOTION_SINGLE_MOTOR) {
-        required_mask = (uint8_t)(1U << (debug_motor_id - 1U));
-    } else if (motion == CHASSIS_MOTION_TUNE_ROUND) {
-        required_mask = Mecanum_GetRequiredMotorMask();
-    } else {
-        required_mask = 0x0FU;
-    }
-    {
-        MotorFeedback samples[4];
-        uint32_t feedback_now;
-        uint8_t fresh_mask;
-        ZDT_Emm_GetFeedback(samples);
-        feedback_now = HAL_GetTick();
-        fresh_mask = MotorFeedback_FreshMask(samples, feedback_now);
-        if ((fresh_mask & required_mask) != required_mask) {
-            /* 故障瞬间记录哪一路超过 300 ms；停车判据与门槛保持不变。 */
-            printf("# CAN FEEDBACK LOST MASK=0x%02X FRESH=0x%02X "
-                   "AGE_MS=%lu,%lu,%lu,%lu SEQ=%lu,%lu,%lu,%lu\r\n",
-                   required_mask, fresh_mask,
-                   (unsigned long)(feedback_now - samples[0].tick),
-                   (unsigned long)(feedback_now - samples[1].tick),
-                   (unsigned long)(feedback_now - samples[2].tick),
-                   (unsigned long)(feedback_now - samples[3].tick),
-                   (unsigned long)samples[0].sequence,
-                   (unsigned long)samples[1].sequence,
-                   (unsigned long)samples[2].sequence,
-                   (unsigned long)samples[3].sequence);
-            ChassisSafety_Stop(motion, "MOTOR FEEDBACK LOST");
-            return;
-        }
-    }
-
     /* CAN状态和四轮实际发送结果对所有运动类型都是共同的硬安全边界。 */
     if (can_tx_fault) {
         if (!can_fault_active) { can_fault_active = 1U; can_fault_since = now; }
@@ -597,7 +550,7 @@ static void ChassisSafety_Process(uint32_t now)
         return;
     }
 
-    /* 只有 RPI 在 WORK/PLOT 运动时要求心跳；COM 调试由操作者直接看护。 */
+    /* 只有 RPI 在 WORK 运动时要求心跳；COM 调试由操作者直接看护。 */
     needs_host = (active_host_link == HOST_LINK_RPI &&
                   current_robot_mode != ROBOT_MODE_TUNE) ? 1U : 0U;
     if (needs_host &&
@@ -663,7 +616,7 @@ static PoseStartResult_t Pose_StartTarget(float pose_x, float pose_y,
     uint32_t last_ops_tick = ops.last_update_tick;
 
     if (reject_if_busy && pose_control_active) return POSE_START_BUSY;
-    if (!ChassisSafety_CanReady() || !Mecanum_FeedbackReady(0x0FU)) return POSE_START_INVALID;
+    if (!ChassisSafety_CanReady()) return POSE_START_INVALID;
     if (!isfinite(pose_x) || !isfinite(pose_y) || !isfinite(pose_yaw)) {
         return POSE_START_INVALID;
     }
@@ -1133,7 +1086,7 @@ static float Pose_BrakeLimitYaw(float error_deg, float tolerance_deg)
 static void Host_PrintHelp(void)
 {
     printf("# HELP HOST LINK COM|RPI | HOST STATUS (COM no heartbeat; RPI heartbeat required)\r\n");
-    printf("# HELP PROTO VERSION | MODE WORK|TUNE|PLOT | MODE STATUS (default WORK; switching stops motion)\r\n");
+    printf("# HELP PROTO VERSION | MODE WORK|TUNE | MODE STATUS (default WORK; switching stops motion)\r\n");
     printf("# HELP STATUS | PING | STOP | RESET | OPS STATUS | OPS MONITOR ON|OFF | OPS ZERO\r\n");
     printf("# HELP PROTO EMM|X | CAN STATUS | MOTOR EN|DIS <id>\r\n");
     printf("# HELP CONTROL STATUS | MOTOR FEEDBACK | MOTOR STOP STATUS | HOST RX STATUS\r\n");
@@ -1144,35 +1097,14 @@ static void Host_PrintHelp(void)
     printf("# HELP TUNE AXIS X|Y|YAW | TUNE LIMIT <mps_or_radps> | NO PING ROUND=5S POSE=15S ROUNDS=20\r\n");
     printf("# HELP PID SET X|Y|YAW <p> <i> <d> | PID LIMIT X|Y|YAW <value> | PID STATUS ALL\r\n");
     printf("# HELP G6220 STATUS | G6220 ENABLE | G6220 DISABLE\r\n");
-    printf("# HELP TELEM OFF|WHEEL|POSE|BOTH|STATUS (two tagged 8-channel groups, 20Hz)\r\n");
-    printf("# HELP PLOT ON|OFF|STATUS (legacy alias for MODE PLOT + TELEM BOTH)\r\n");
+    printf("# HELP TELEM OFF|POSE|STATUS (OPS pose group, 20Hz)\r\n");
+    printf("# HELP PLOT STATUS (retired; MOTOR GET is on-demand)\r\n");
     printf("# LIMIT motor id=1..4 rpm=+/-%.0f duration=100..%lu ms\r\n",
            DEBUG_MOTOR_MAX_RPM, DEBUG_MOTOR_MAX_MS);
     printf("# LIMIT move speed=0..%.2f mps duration=100..%lu ms; FWD=+Y LEFT=-X\r\n",
            DEBUG_MOVE_MAX_MPS, DEBUG_MOVE_MAX_MS);
     printf("# LIMIT turn speed=0..%.2f radps duration=100..%lu ms\r\n",
            DEBUG_TURN_MAX_RADPS, DEBUG_MOVE_MAX_MS);
-}
-
-static void Motor_ProcessFeedbackPolling(uint32_t now)
-{
-    uint8_t result;
-    uint8_t mask;
-    uint8_t id;
-
-    if ((uint32_t)(now - motor_feedback_poll_tick) < MOTOR_FEEDBACK_POLL_MS) {
-        return;
-    }
-
-    motor_feedback_poll_tick = now;
-    mask = Mecanum_GetRequiredMotorMask();
-    id = motor_feedback_poll_id;
-    motor_feedback_poll_id++;
-    if (motor_feedback_poll_id > 4U) motor_feedback_poll_id = 1U;
-    if (!(mask & (uint8_t)(1U << (id - 1U)))) return;
-    result = ZDT_Emm_ReadSpeedByID(id);
-    /* 查询轮询的入队失败只是瞬时拥塞，不能升级成会触发停车判定的运动故障。 */
-    Mecanum_ReportPollResult(result);
 }
 
 static void Telemetry_Process(uint32_t now)
@@ -1390,7 +1322,7 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
     }
 
     if (strcmp(command, "PROTO VERSION") == 0) {
-        printf("# PROTO VERSION=%u MODES=WORK,TUNE,PLOT LEGACY_POSE=1 HOST_LINK=REQUIRED\r\n",
+        printf("# PROTO VERSION=%u MODES=WORK,TUNE LEGACY_POSE=1 HOST_LINK=REQUIRED\r\n",
                HOST_PROTOCOL_VERSION);
         return 1U;
     }
@@ -1412,16 +1344,9 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
         return 1U;
     }
 
-    if (strcmp(command, "MODE PLOT") == 0) {
-        Robot_SetMode(ROBOT_MODE_PLOT);
-        printf("# PLOT ON LEGACY=1 TELEM=BOTH FORMAT=TAGGED_ASCII GROUPS=W8,P8 PERIOD=50MS\r\n");
-        return 1U;
-    }
-
-    if (strcmp(command, "PLOT ON") == 0) {
-        /* 兼容旧命令：PLOT ON 等价于安全切换到独立 PLOT 模式。 */
-        Robot_SetMode(ROBOT_MODE_PLOT);
-        printf("# PLOT ON LEGACY=1 TELEM=BOTH FORMAT=TAGGED_ASCII GROUPS=W8,P8 PERIOD=50MS\r\n");
+    if (strcmp(command, "MODE PLOT") == 0 || strcmp(command, "PLOT ON") == 0 ||
+        strcmp(command, "TELEM WHEEL") == 0 || strcmp(command, "TELEM BOTH") == 0) {
+        printf("# ERROR PLOT RETIRED; USE MODE TUNE OR TELEM POSE; MOTOR GET IS ON-DEMAND\r\n");
         return 1U;
     }
 
@@ -1436,11 +1361,7 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
     }
 
     if (strcmp(command, "PLOT STATUS") == 0) {
-        printf("# PLOT ENABLED=%u MODE=%s LEGACY=1 TELEM_MASK=%u "
-               "FORMAT=TAGGED_ASCII GROUPS=W8,P8 PERIOD=50MS TX_OK=%lu TX_ERR=%lu\r\n",
-               telemetry_mask != 0U, RobotMode_Name(current_robot_mode),
-               telemetry_mask, (unsigned long)telemetry_tx_ok,
-               (unsigned long)telemetry_tx_error);
+        printf("# PLOT ENABLED=0 RETIRED=1 MOTOR_FEEDBACK=ON_DEMAND\r\n");
         return 1U;
     }
 
@@ -1466,7 +1387,6 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
         else telemetry_mask = TELEMETRY_MASK_BOTH;
         telemetry_last_tick = HAL_GetTick();
         telemetry_next_group = TELEMETRY_MASK_WHEEL;
-        motor_feedback_poll_tick = telemetry_last_tick;
         printf("# TELEM MASK=%u WHEEL=%u POSE=%u FORMAT=TAGGED_ASCII GROUPS=W8,P8\r\n",
                telemetry_mask,
                (telemetry_mask & TELEMETRY_MASK_WHEEL) != 0U,
@@ -1640,10 +1560,8 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
         } else {
             Robot_StopAllMotion();
             (void)Mecanum_SetRequiredMotorMask((uint8_t)motor_mask);
-            motor_feedback_poll_id = 1U;
-            motor_feedback_poll_tick = 0U;
             (void)StopAllMotors();
-            printf("# MOTOR MASK=0x%02X POLL=SELECTED MOTION=STOPPED\r\n",
+            printf("# MOTOR MASK=0x%02X POLL=OFF MOTION=STOPPED\r\n",
                    Mecanum_GetRequiredMotorMask());
         }
         return 1U;
@@ -1716,9 +1634,9 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
             return 1U;
         }
 
-        /* 调试运动仅限 TUNE/PLOT；WORK 模式下唯一运动源是 POSE SET（受心跳与安全检查保护）。 */
+        /* 调试运动仅限 TUNE；WORK 模式下唯一运动源是 POSE SET（受心跳与安全检查保护）。 */
         if (current_robot_mode == ROBOT_MODE_WORK) {
-            printf("# ERROR MODE REQUIRED=TUNE|PLOT CURRENT=WORK\r\n");
+            printf("# ERROR MODE REQUIRED=TUNE CURRENT=WORK\r\n");
             return 1U;
         }
         if (Mecanum_GetRequiredMotorMask() != 0x0FU) {
@@ -1770,9 +1688,9 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
             return 1U;
         }
 
-        /* 调试运动仅限 TUNE/PLOT；WORK 模式下唯一运动源是 POSE SET（受心跳与安全检查保护）。 */
+        /* 调试运动仅限 TUNE；WORK 模式下唯一运动源是 POSE SET（受心跳与安全检查保护）。 */
         if (current_robot_mode == ROBOT_MODE_WORK) {
-            printf("# ERROR MODE REQUIRED=TUNE|PLOT CURRENT=WORK\r\n");
+            printf("# ERROR MODE REQUIRED=TUNE CURRENT=WORK\r\n");
             return 1U;
         }
         if (Mecanum_GetRequiredMotorMask() != 0x0FU) {
@@ -1814,7 +1732,7 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
         if (!Motor_IsValidId(id)) {
             printf("# ERROR MOTOR ID 1..4\r\n");
         } else {
-            ZDT_Emm_SetSpeedByID((uint8_t)id, 0.0f);
+            ZDT_Emm_StopMask((uint8_t)(1U << (id - 1U)));
             result_a = ZDT_Emm_EnableByID((uint8_t)id, 0U);
             if (debug_motor_active && debug_motor_id == (uint8_t)id) debug_motor_active = 0U;
             printf("# MOTOR DIS ID=%u TX=%u\r\n", id, result_a);
@@ -1826,7 +1744,7 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
         if (!Motor_IsValidId(id)) {
             printf("# ERROR MOTOR ID 1..4\r\n");
         } else {
-            result_a = ZDT_Emm_SetSpeedByID((uint8_t)id, 0.0f);
+            result_a = ZDT_Emm_StopMask((uint8_t)(1U << (id - 1U)));
             if (debug_motor_active && debug_motor_id == (uint8_t)id) debug_motor_active = 0U;
             printf("# MOTOR STOP ID=%u TX=%u\r\n", id, result_a);
         }
@@ -1859,9 +1777,9 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
             printf("# ERROR MOTOR ID=%u NOT IN MASK=0x%02X\r\n",
                    id, Mecanum_GetRequiredMotorMask());
         } else {
-            /* 调试运动仅限 TUNE/PLOT；WORK 模式下唯一运动源是 POSE SET（受心跳与安全检查保护）。 */
+            /* 调试运动仅限 TUNE；WORK 模式下唯一运动源是 POSE SET（受心跳与安全检查保护）。 */
             if (current_robot_mode == ROBOT_MODE_WORK) {
-                printf("# ERROR MODE REQUIRED=TUNE|PLOT CURRENT=WORK\r\n");
+                printf("# ERROR MODE REQUIRED=TUNE CURRENT=WORK\r\n");
                 return 1U;
             }
             /* Motion admission never clears the transport fault latch. */
@@ -2349,7 +2267,6 @@ static void Boot_ServiceDelay(uint32_t duration)
     uint32_t start = HAL_GetTick();
     while ((uint32_t)(HAL_GetTick() - start) < duration) {
         ZDT_CAN_Process(HAL_GetTick());
-        Motor_ProcessFeedbackPolling(HAL_GetTick());
         Mecanum_ProcessFeedback(HAL_GetTick());
         HAL_Delay(1U);
     }
@@ -2418,7 +2335,7 @@ void RobotApp_Init(void)
     host_wait_start_tick = HAL_GetTick();
     last_host_command_tick = host_wait_start_tick;
     printf("# STM32F407 MECANUM X/Y/YAW PID CONTROLLER HOST WAIT\r\n");
-    printf("# PROTO VERSION=%u MODES=WORK,TUNE,PLOT LEGACY_POSE=1 HOST_LINK=REQUIRED\r\n",
+    printf("# PROTO VERSION=%u MODES=WORK,TUNE LEGACY_POSE=1 HOST_LINK=REQUIRED\r\n",
            HOST_PROTOCOL_VERSION);
     printf("# HOST WAIT STATE=WAITING TIMEOUT_MS=%lu ACCEPT=COM,RPI\r\n",
            (unsigned long)HOST_WAIT_TIMEOUT_MS);
@@ -2467,7 +2384,7 @@ void RobotApp_Process(void)
       if (debug_motor_active && (int32_t)(now - debug_motor_stop_tick) >= 0)
       {
           Mecanum_ReportCanTxResult(
-              ZDT_Emm_SetSpeedByID(debug_motor_id, 0.0f));
+              ZDT_Emm_StopMask((uint8_t)(1U << (debug_motor_id - 1U))));
           printf("# MOTOR AUTO STOP ID=%u\r\n", debug_motor_id);
           debug_motor_active = 0U;
       }
@@ -2485,15 +2402,23 @@ void RobotApp_Process(void)
           Ops_PrintStatus();
       }
 
-      Motor_ProcessFeedbackPolling(HAL_GetTick());
       ZDT_CAN_Process(HAL_GetTick());
       if (ZDT_CAN_RecoverWhenIdle(
               ChassisSafety_GetActiveMotion() == CHASSIS_MOTION_NONE &&
-              Mecanum_FeedbackReady(Mecanum_GetRequiredMotorMask()) &&
-              Mecanum_GetStopStatus().state == MOTOR_STOP_CONFIRMED)) {
+              ZDT_CAN_StopSent(Mecanum_GetRequiredMotorMask()))) {
 
           printf("# CAN RECOVERED MOTION=STOPPED MASK=0x%02X\r\n",
                  Mecanum_GetRequiredMotorMask());
+      }
+      /* Idle refresh covers late motor power-up; never replay old motion. */
+      {
+          static uint32_t idle_refresh_tick;
+          if (ChassisSafety_GetActiveMotion() == CHASSIS_MOTION_NONE &&
+              (uint32_t)(now - idle_refresh_tick) >= 1000U) {
+              idle_refresh_tick = now;
+              if (ZDT_CAN_StopSent(Mecanum_GetRequiredMotorMask())) ZDT_Emm_RefreshEnables();
+              (void)StopAllMotors();
+          }
       }
       if (active_host_link != HOST_LINK_NONE) {
           Telemetry_Process(now);

@@ -66,6 +66,6 @@ void MotorStop_Update(MotorStopMonitor *monitor, const MotorFeedback samples[4],
 }
 const char *MotorStop_Name(MotorStopState state)
 {
-    static const char *names[] = {"IDLE", "REQUESTED", "WAIT_FEEDBACK", "CONFIRMED", "UNCONFIRMED"};
-    return names[(unsigned int)state <= MOTOR_STOP_UNCONFIRMED ? state : MOTOR_STOP_UNCONFIRMED];
+    static const char *names[] = {"IDLE", "REQUESTED", "WAIT_FEEDBACK", "CONFIRMED", "UNCONFIRMED", "SENT"};
+    return names[(unsigned int)state <= MOTOR_STOP_SENT ? state : MOTOR_STOP_UNCONFIRMED];
 }
