@@ -326,6 +326,7 @@ static void test_command_only_transport(void)
     assert(!StopAllMotors()); pump_stops(); Mecanum_ProcessFeedback(tick);
     assert(Mecanum_GetStopStatus().state == MOTOR_STOP_SENT);
     assert(ZDT_CAN_StopSent(15U));
+    assert(ZDT_CAN_StopSentMask() == 15U);
     /* No fabricated speed feedback or physical stop confirmation. */
     assert(!samples[0].valid);
 

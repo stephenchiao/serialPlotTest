@@ -45,6 +45,7 @@ uint8_t ZDT_CAN_RecoverWhenIdle(uint8_t eligible);
  * STOP 丢弃旧普通队列并申请撤销在途速度，随后优先发送立即停止命令。 */
 void ZDT_CAN_BeginStop(void);
 uint8_t ZDT_CAN_StopSent(uint8_t mask);
+uint8_t ZDT_CAN_StopSentMask(void); /* Per-wheel CAN TXOK evidence for diagnostics. */
 uint8_t ZDT_CAN_SendStop(uint32_t id, uint8_t *data, uint8_t length);
 /* Consume notification only. The safety latch is cleared by idle recovery. */
 uint8_t ZDT_CAN_ConsumeFault(void);

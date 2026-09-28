@@ -119,6 +119,7 @@ uint8_t ZDT_CAN_StopSent(uint8_t mask)
 {
     return mask && (stop_sent & mask) == mask;
 }
+uint8_t ZDT_CAN_StopSentMask(void) { return stop_sent; }
 uint8_t ZDT_CAN_StopPending(void)
 {
     return (stop_required & stop_sent) != stop_required;

@@ -307,8 +307,8 @@ static uint8_t HostLink_ProcessCommand(const char *command)
     if (strcmp(command, "MOTOR STOP STATUS") == 0) {
         MotorStopMonitor stop = Mecanum_GetStopStatus();
         uint8_t mask = Mecanum_GetRequiredMotorMask();
-        printf("# MOTOR STOP STATE=%s MASK=0x%02X FRESH=%u EVIDENCE=CAN_TX_ONLY ELAPSED_MS=%lu\r\n",
-               MotorStop_Name(stop.state), mask, Mecanum_FeedbackReady(mask),
+        printf("# MOTOR STOP STATE=%s MASK=0x%02X SENT_MASK=0x%02X FRESH=%u EVIDENCE=CAN_TX_ONLY ELAPSED_MS=%lu\r\n",
+               MotorStop_Name(stop.state), mask, ZDT_CAN_StopSentMask(), Mecanum_FeedbackReady(mask),
                (unsigned long)(stop.state == MOTOR_STOP_IDLE ? 0U :
                                (stop.state == MOTOR_STOP_SENT ?
                                 stop.confirmed_tick - stop.requested_tick : HAL_GetTick() - stop.requested_tick)));
