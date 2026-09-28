@@ -1265,11 +1265,15 @@ static void Motor_ProcessFeedback(void)
         } else {
             const char *result = "OTHER";
             /*
-             * 速度闭环每 20 ms 给四个电机发送一次 0xF6，正常 ACK 会形成约
-             * 200 行/秒的无效串口流量。仅静默正常 0x02 ACK，条件/格式等异常仍输出。
+             * 速度命令和空闲停车/使能刷新均可能产生大量正常 ACK。
+             * 静默这些 0x02 应答；条件/格式等异常仍输出。
              * MOTOR RUN 之后允许每个电机打印一次 ACK，便于区分“电机没收到命令”
              * 和“电机收到命令但没有转动”。
              */
+            if (event.value == 0x02U &&
+                (event.function_code == 0xFEU || event.function_code == 0xF3U)) {
+                continue;
+            }
             if (event.function_code == 0xF6U) {
                 if (motor_ack_print_mask & (uint8_t)(1U << (event.motor_id - 1U))) {
                     motor_ack_print_mask &= (uint8_t)~(1U << (event.motor_id - 1U));
@@ -2071,6 +2075,7 @@ static void Host_ProcessCommand(void)
         /* 等待期间只开放无运动副作用的探测和停车命令。 */
         if (strcmp(command, "PING") == 0 ||
             strcmp(command, "PROTO VERSION") == 0 ||
+            strcmp(command, "CAN STATUS") == 0 ||
             strcmp(command, "HELP") == 0) {
             (void)Host_ProcessOperationalCommand(command);
         } else if (strcmp(command, "STOP") == 0) {

@@ -181,10 +181,10 @@ void LLM_TunerStartRound(void)
         return;
     }
 
-    /* Stopping cancels old speed/query mailboxes. Wait for zero-speed feedback
-     * and any CAN recovery before announcing a runnable round. */
+    /* Stopping cancels old speed mailboxes. Wait for stop-frame transmission
+     * and CAN recovery before announcing a runnable round. */
     StopAllMotors();
-    /* ARMING waits for stop confirmation and the common idle recovery gate. */
+    /* ARMING waits for stop-frame transmission and the idle recovery gate. */
     tune_start_time = now;
     tuner_state = LLM_TUNE_STATE_ARMING;
     printf("# ROUND ARMING AXIS=%s\r\n", LLM_TunerAxisName(tuner_axis));
@@ -407,7 +407,10 @@ void LLM_TunerProcess(uint32_t now)
     }
 
     Mecanum_Kinematics(command_vx, command_vy, command_vz, &v1, &v2, &v3, &v4);
-    SetAllMotorsSpeed(v1, v2, v3, v4);
+    if (SetAllMotorsSpeed(v1, v2, v3, v4) != 0U) {
+        LLM_TunerStopRound("CAN FAULT");
+        return;
+    }
     PID_ApplyOutput(pid, Mecanum_GetAppliedScale() * tune_direction * tune_output);
     if (tuner_axis == LLM_TUNE_AXIS_X) PID_ApplyOutput(tuner_pid_y, Mecanum_GetAppliedScale() * command_vy);
     if (tuner_axis == LLM_TUNE_AXIS_Y) PID_ApplyOutput(tuner_pid_x, Mecanum_GetAppliedScale() * command_vx);
