@@ -1,0 +1,37 @@
+{
+  "platform": "raspberry_pi_5",
+  "front": {
+    "logical_name": "camera_2",
+    "role": "front_navigation",
+    "connector": "CAM/DISP1",
+    "camera_num": 1,
+    "model": null,
+    "frame_size": [640, 480],
+    "format": "RGB888",
+    "fps": 30,
+    "buffer_count": 3,
+    "settle_seconds": 1.0,
+    "qr_confirmations": 2,
+    "controls": {
+      "AwbEnable": true
+    }
+  },
+  "gripper": {
+    "logical_name": "camera_1",
+    "role": "gripper_material",
+    "connector": "CAM/DISP0",
+    "camera_num": 0,
+    "model": null,
+    "frame_size": [640, 480],
+    "format": "RGB888",
+    "fps": 15,
+    "buffer_count": 3,
+    "settle_seconds": 2.0,
+    "controls": {
+      "AwbEnable": true
+    },
+    "grip_center": [320, 240],
+    "alignment_tolerance_pixels": [18, 18],
+    "require_global_ready": false
+  }
+}

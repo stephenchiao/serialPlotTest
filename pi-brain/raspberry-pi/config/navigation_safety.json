@@ -1,0 +1,10 @@
+{
+  "camera_stale_after_seconds": 0.5,
+  "road_observation_stale_after_seconds": 0.25,
+  "camera_blind_distance_mm": 120,
+  "total_reaction_seconds": 0.18,
+  "minimum_braking_deceleration_mm_s2": 700,
+  "braking_margin_mm": 80,
+  "resume_clearance_margin_mm": 40,
+  "perception_grace_seconds": 0.6
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "host_protocol_version": 4,
+  "wire_version": 2,
+  "max_payload": 64,
+  "capabilities": {
+    "QUERY_POSE": 1,
+    "SPEED_LIMITS": 2,
+    "BINARY_TELEMETRY": 4,
+    "ASYNC_TX": 8,
+    "SESSION_RECOVERY": 16,
+    "ATOMIC_POSE_LIMITS": 32
+  },
+  "message_types": {
+    "COMMAND": 16,
+    "RESPONSE": 17,
+    "EVENT": 34,
+    "TELEMETRY": 35
+  },
+  "commands": {
+    "PING": 1,
+    "STOP_ALL": 2,
+    "SESSION_PROBE": 3,
+    "SET_POSE_GOAL": 128,
+    "CANCEL_POSE_GOAL": 129,
+    "QUERY_POSE_GOAL": 130,
+    "SET_SPEED_LIMITS": 131,
+    "SET_POSE_GOAL_WITH_LIMITS": 132
+  },
+  "response_status": {
+    "OK": 0,
+    "UNKNOWN_COMMAND": 1,
+    "INVALID_LENGTH": 2,
+    "INVALID_ARGUMENT": 3,
+    "BUSY": 4,
+    "INTERNAL_ERROR": 5
+  },
+  "events": {
+    "POSE_STARTED": 16,
+    "POSE_REACHED": 17,
+    "POSE_CANCELLED": 18,
+    "MOTION_FAULT": 19
+  },
+  "pose_states": {
+    "IDLE": 0,
+    "MOVING": 2,
+    "REACHED": 3,
+    "CANCELLED": 4,
+    "FAULT": 5
+  },
+  "motion_faults": {
+    "UNSPECIFIED": 0,
+    "OPS9_LOST": 1,
+    "HOST_LOST": 2,
+    "CAN_FAULT": 3,
+    "OUT_OF_BOUNDS": 4,
+    "TIMEOUT": 5,
+    "UART_FAULT": 6,
+    "INTERNAL_ERROR": 255
+  },
+  "telemetry_types": {
+    "WHEEL": 1,
+    "POSE": 2,
+    "LINK_STATS": 3
+  }
+}

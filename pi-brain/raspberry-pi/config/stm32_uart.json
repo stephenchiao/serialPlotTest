@@ -1,0 +1,14 @@
+{
+  "transport": "uart",
+  "protocol_version": 2,
+  "port": "/dev/serial/by-id/替换为你的USB转串口设备名",
+  "baudrate": 115200,
+  "read_timeout_seconds": 0.05,
+  "command_timeout_seconds": 0.5,
+  "reconnect_interval_seconds": 1.0,
+  "heartbeat_interval_seconds": 0.1,
+  "heartbeat_timeout_seconds": 0.5,
+  "handshake_timeout_seconds": 2.0,
+  "recovery_timeout_seconds": 3.0,
+  "communication_watchdog_seconds": 1.5
+}

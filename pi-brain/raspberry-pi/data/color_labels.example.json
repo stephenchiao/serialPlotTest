@@ -1,0 +1,19 @@
+{
+  "samples": [
+    {
+      "file": "dataset/frame_001.jpg",
+      "expected_codes": [1, 2, 4],
+      "note": "红黄绿，正常光照"
+    },
+    {
+      "file": "dataset/frame_002.jpg",
+      "expected_codes": [2, 3, 5],
+      "note": "黄蓝黑，转盘运动中"
+    },
+    {
+      "file": "dataset/frame_003.jpg",
+      "expected_codes": [],
+      "note": "只有白色和灰色背景，用来统计误报"
+    }
+  ]
+}

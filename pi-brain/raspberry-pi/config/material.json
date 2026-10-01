@@ -1,0 +1,21 @@
+{
+  "backend": "model",
+  "model": {
+    "engine": "ultralytics_yolo",
+    "weights": null,
+    "input_color_order": "BGR",
+    "confidence_threshold": 0.6,
+    "iou_threshold": 0.45,
+    "image_size": 640,
+    "device": "cpu",
+    "max_detections": 20
+  },
+  "class_to_material": {},
+  "confirmation": {
+    "required_frames": 3,
+    "matching_iou": 0.3,
+    "maximum_gap_seconds": 1.0
+  },
+  "minimum_box_area_pixels": 100,
+  "note": "尚无训练模型和物料编号。weights 与 class_to_material 必须显式配置；不自动使用现有权重或按 class_id+1 编号。相对权重路径以本配置文件所在目录为基准。"
+}

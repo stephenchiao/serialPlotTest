@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.uv-cache/
+tmp/
+references/
+runtime_data/
+data/color_dataset/
+data/color_report.json

@@ -1,0 +1,3 @@
+# Optional: only needed after trained weights are explicitly configured.
+-r requirements-hardware.txt
+ultralytics>=8.4,<9

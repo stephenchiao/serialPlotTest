@@ -1,0 +1,22 @@
+{
+  "calibration_required": true,
+  "input_color_order": "RGB",
+  "roi_top_fraction": 0.42,
+  "central_corridor_fraction": 0.34,
+  "minimum_drivable_fraction": 0.35,
+  "minimum_central_drivable_fraction": 0.68,
+  "maximum_forbidden_fraction": 0.12,
+  "gray_hsv": {
+    "lower": [0, 0, 55],
+    "upper": [179, 70, 210]
+  },
+  "yellow_hsv": {
+    "lower": [18, 45, 80],
+    "upper": [42, 255, 255]
+  },
+  "white_hsv": {
+    "lower": [0, 0, 205],
+    "upper": [179, 45, 255]
+  },
+  "warning": "All thresholds are placeholders. Calibrate with actual field lighting before setting calibration_required to false."
+}

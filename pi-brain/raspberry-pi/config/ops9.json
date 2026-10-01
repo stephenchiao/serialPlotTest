@@ -1,0 +1,18 @@
+{
+  "calibration_required": true,
+  "transport": "stm32_telemetry",
+  "telemetry_rate_hz": 20,
+  "stale_after_seconds": 0.25,
+  "minimum_quality": 30,
+  "maximum_position_jump_mm": 300,
+  "maximum_yaw_jump_mrad": 800,
+  "movement_threshold_mm": 3,
+  "movement_threshold_mrad": 10,
+  "movement_hold_seconds": 0.2,
+  "required_status_flags": ["VALID", "CALIBRATED", "CONTACT_OK"],
+  "zero_at_start": true,
+  "map_transform": {
+    "ops9_start_pose_mm_rad": [0, 0, 0],
+    "map_start_pose_mm_rad": [2100, 1800, 3.141593]
+  }
+}

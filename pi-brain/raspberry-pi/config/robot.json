@@ -1,0 +1,16 @@
+{
+  "loop_interval_seconds": 0.05,
+  "task_code_timeout_seconds": 8.0,
+  "action_timeout_seconds": 35.0,
+  "inactivity_timeout_seconds": 14.0,
+  "max_action_retries": 2,
+  "action_retry_wait_seconds": 1.0,
+  "safety_pause_timeout_seconds": 10.0,
+  "safety_resume_stable_seconds": 0.2,
+  "safety_resume_confirmations": 2,
+  "component_factory": null,
+  "simulation_auto_start": false,
+  "simulation_start_delay_seconds": 0.5,
+  "simulation_task_code": "452+321+254+312",
+  "log_level": "INFO"
+}

@@ -1,0 +1,102 @@
+{
+  "white_balance": {
+    "enabled": true,
+    "lock_camera_awb": true,
+    "calibration_frames": 8,
+    "sample_step": 2,
+    "min_brightness": 70,
+    "fallback_min_brightness": 80,
+    "max_channel_value": 245,
+    "max_channel_difference": 90,
+    "min_strict_pixels": 200,
+    "min_pixels": 50,
+    "gain_min": 0.65,
+    "gain_max": 1.5
+  },
+  "detection": {
+    "expected_color_count": 3,
+    "min_object_area": 300,
+    "strict_min_object_area": 500,
+    "max_object_area_ratio": 0.3,
+    "max_objects_per_color": 2,
+    "edge_margin": 2,
+    "min_aspect_ratio": 0.3,
+    "max_aspect_ratio": 3.2,
+    "min_fill_ratio": 0.32,
+    "strict_min_fill_ratio": 0.48,
+    "min_solidity": 0.68,
+    "strict_min_solidity": 0.8,
+    "morph_kernel_size": 5,
+    "history_length": 7,
+    "min_confirmations": 4,
+    "state_valid_seconds": 1.5
+  },
+  "runtime": {
+    "print_interval": 1.0,
+    "state_write_interval": 0.5,
+    "state_file": "/tmp/color_detect_state.json"
+  },
+  "colors": [
+    {
+      "code": 1,
+      "name": "RED",
+      "cn_name": "红色",
+      "ranges": [
+        [[0, 130, 70], [10, 255, 255]],
+        [[170, 130, 70], [179, 255, 255]]
+      ],
+      "draw_color": [0, 0, 255],
+      "strict_shape_filter": false
+    },
+    {
+      "code": 2,
+      "name": "YELLOW",
+      "cn_name": "黄色",
+      "ranges": [
+        [[18, 110, 100], [38, 255, 255]]
+      ],
+      "draw_color": [0, 255, 255],
+      "strict_shape_filter": false
+    },
+    {
+      "code": 3,
+      "name": "BLUE",
+      "cn_name": "蓝色",
+      "ranges": [
+        [[105, 150, 45], [135, 255, 255]]
+      ],
+      "draw_color": [255, 0, 0],
+      "strict_shape_filter": false
+    },
+    {
+      "code": 4,
+      "name": "GREEN",
+      "cn_name": "绿色",
+      "ranges": [
+        [[42, 145, 65], [85, 255, 255]]
+      ],
+      "draw_color": [0, 255, 0],
+      "strict_shape_filter": false
+    },
+    {
+      "code": 5,
+      "name": "BLACK",
+      "cn_name": "黑色",
+      "ranges": [
+        [[0, 0, 0], [179, 255, 60]]
+      ],
+      "draw_color": [128, 128, 128],
+      "strict_shape_filter": true
+    },
+    {
+      "code": 6,
+      "name": "LIGHT BLUE",
+      "cn_name": "浅蓝色",
+      "ranges": [
+        [[85, 45, 120], [110, 144, 255]]
+      ],
+      "draw_color": [255, 255, 0],
+      "strict_shape_filter": false
+    }
+  ]
+}

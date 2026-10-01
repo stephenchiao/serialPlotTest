@@ -1,0 +1,13 @@
+{
+  "detection": {
+    "roi_top_ratio": 0.55,
+    "line_is_dark": true,
+    "min_line_area": 300,
+    "max_line_area_ratio": 0.8,
+    "morph_kernel_size": 5
+  },
+  "control": {
+    "turn_threshold": 0.15,
+    "error_smoothing": 0.35
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "map_version": 1,
+  "nominal_map_requires_field_calibration": true,
+  "coordinate_system": "origin at lower-left, +x right, +y up, millimetres",
+  "field": {
+    "width_mm": 2400,
+    "height_mm": 2400
+  },
+  "robot": {
+    "footprint_radius_mm": 150,
+    "safety_margin_mm": 30
+  },
+  "start": {
+    "zone": "upper_right",
+    "initial_node": "START_TOP",
+    "map_pose": [2100, 1800, 3.141593]
+  },
+  "planner": {
+    "control_mode": "stm32_pose_goal",
+    "turn_penalty_mm": 80,
+    "maximum_speed_mm_s": 300,
+    "maximum_yaw_rate_mrad_s": 800,
+    "waypoint_tolerance_mm": 90,
+    "pose_request_timeout_seconds": 0.5,
+    "waypoint_timeout_seconds": 35
+  },
+  "target_headings_mrad": {
+    "source_turntable": 1571,
+    "processing": -1571,
+    "temporary_storage": 3142
+  },
+  "targets": {
+    "source_turntable": "SOURCE",
+    "processing": "PROCESS",
+    "temporary_storage": "STORAGE"
+  },
+  "nodes": {
+    "SOURCE": [1200, 2050],
+    "T": [1200, 1800],
+    "TL": [600, 1800],
+    "TR": [1800, 1800],
+    "L": [600, 1200],
+    "C": [1200, 1200],
+    "R": [1800, 1200],
+    "BL": [600, 600],
+    "B": [1200, 600],
+    "BR": [1800, 600],
+    "PROCESS": [1200, 350],
+    "STORAGE": [350, 1200],
+    "QR": [2050, 1200],
+    "START_TOP": [2100, 1800],
+    "START_BOTTOM": [2100, 600]
+  },
+  "edges": [
+    {"name": "SOURCE-T", "start": "SOURCE", "end": "T", "width_mm": 400},
+    {"name": "TL-T", "start": "TL", "end": "T", "width_mm": 400},
+    {"name": "T-TR", "start": "T", "end": "TR", "width_mm": 400},
+    {"name": "L-C", "start": "L", "end": "C", "width_mm": 400},
+    {"name": "C-R", "start": "C", "end": "R", "width_mm": 400},
+    {"name": "BL-B", "start": "BL", "end": "B", "width_mm": 400},
+    {"name": "B-BR", "start": "B", "end": "BR", "width_mm": 400},
+    {"name": "TL-L", "start": "TL", "end": "L", "width_mm": 400},
+    {"name": "L-BL", "start": "L", "end": "BL", "width_mm": 400},
+    {"name": "T-C", "start": "T", "end": "C", "width_mm": 400},
+    {"name": "C-B", "start": "C", "end": "B", "width_mm": 400},
+    {"name": "TR-R", "start": "TR", "end": "R", "width_mm": 400},
+    {"name": "R-BR", "start": "R", "end": "BR", "width_mm": 400},
+    {"name": "B-PROCESS", "start": "B", "end": "PROCESS", "width_mm": 400},
+    {"name": "L-STORAGE", "start": "L", "end": "STORAGE", "width_mm": 400},
+    {"name": "R-QR", "start": "R", "end": "QR", "width_mm": 400},
+    {"name": "START_TOP-TR", "start": "START_TOP", "end": "TR", "width_mm": 400},
+    {"name": "START_BOTTOM-BR", "start": "START_BOTTOM", "end": "BR", "width_mm": 400}
+  ]
+}

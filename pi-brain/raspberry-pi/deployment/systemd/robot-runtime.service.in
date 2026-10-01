@@ -1,0 +1,19 @@
+[Unit]
+Description=Intelligent Transport Robot Runtime
+After=local-fs.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@PROJECT_DIR@
+ExecStart=@PYTHON@ -m robot_runtime.app --config @PROJECT_DIR@/config/robot.json
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Environment=PYTHONUNBUFFERED=1
+RuntimeDirectory=robot-runtime
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

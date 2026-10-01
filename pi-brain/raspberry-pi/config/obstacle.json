@@ -1,0 +1,25 @@
+{
+  "calibration_required": true,
+  "input_color_order": "RGB",
+  "black_threshold": 55,
+  "minimum_area_px": 80,
+  "maximum_area_px": 12000,
+  "minimum_aspect_ratio": 0.25,
+  "maximum_aspect_ratio": 1.8,
+  "roi_top_fraction": 0.2,
+  "physical_radius_mm": 25,
+  "projection_uncertainty_mm": 35,
+  "homography_image_to_base": [
+    [0.0, -2.5, 1200.0],
+    [-2.5, 0.0, 800.0],
+    [0.0, 0.0, 1.0]
+  ],
+  "tracking": {
+    "confirmations_required": 3,
+    "matching_distance_mm": 120,
+    "retention_seconds": 1.0,
+    "clear_confirmations_required": 3,
+    "minimum_confidence": 0.55
+  },
+  "warning": "The homography is only a placeholder. Replace it using the installed front camera before enabling motors."
+}
