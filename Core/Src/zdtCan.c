@@ -21,6 +21,8 @@ static uint8_t query_head, query_tail, query_count, stop_required, stop_sent;
 static uint8_t cursor, flight_kind, flight_motor, aborting, restart_phase;
 static uint32_t flight_mailbox, flight_tick, retry_at[4], enable_at[4], restart_tick;
 static uint8_t retry_mask, enable_delay_mask;
+static uint8_t progress_active, progress_restart, restart_attempted;
+static uint32_t progress_tick, progress_tx_ok;
 static volatile uint8_t flight_done, fault_event;
 static ZDT_CAN_RxCallback_t rx_callback;
 static ZDT_CAN_Stats_t stats;
@@ -142,14 +144,35 @@ static void FinishFlight(uint32_t now)
     } else if (flight_kind == FRAME_SPEED && !aborting) LatchFault();
     flight_mailbox = 0U; flight_done = aborting = 0U;
 }
-/* Only a stuck abort/HAL state needs software restart. ABOM handles bus-off.
+/* 监督整个发送流：反复超时并成功撤销同样可能长期没有 TXOK。
+ * 重试、换轮和入队不能刷新时间；只有 TXOK 或真正无任务才刷新。 */
+static void WatchTxProgress(uint32_t now)
+{
+    uint8_t i, work = flight_mailbox || query_count;
+    uint32_t tx_ok = stats.tx_ok;
+    for (i = 0U; i < 4U; ++i)
+        work |= speeds[i].pending || stops[i].pending || enables[i].pending;
+    if (!work || !progress_active || tx_ok != progress_tx_ok) {
+        progress_active = work;
+        progress_tick = now;
+        progress_tx_ok = tx_ok;
+        return;
+    }
+    if (!progress_restart && (uint32_t)(now - progress_tick) >= RESTART_MS) {
+        progress_restart = 1U;
+        stats.no_tx_repairs++;
+        LatchFault();
+    }
+}
+/* Stalled TX progress or a stuck abort/HAL state needs restart. ABOM handles bus-off.
  * Each HAL step runs in the main loop with interrupts enabled. CAN2 is untouched. */
 static uint8_t Restart(uint32_t now)
 {
     HAL_StatusTypeDef result;
     if (hcan1.Instance->ESR & CAN_ESR_BOFF) return 0U;
     if (!restart_phase) {
-        if ((uint32_t)(now - restart_tick) < RESTART_MS) return 0U;
+        if (restart_attempted && (uint32_t)(now - restart_tick) < RESTART_MS) return 0U;
+        restart_attempted = 1U;
         restart_tick = now; restart_phase = 1U;
     }
     stats.error_latched |= HAL_CAN_GetError(&hcan1);
@@ -175,6 +198,7 @@ static uint8_t Restart(uint32_t now)
             if (flight_mailbox) { aborting = 1U; FinishFlight(now); }
             (void)HAL_CAN_ResetError(&hcan1);
             restart_phase = 0U; stats.stall_recoveries++;
+            progress_active = progress_restart = 0U;
         }
     }
     if (result != HAL_OK) {
@@ -190,6 +214,7 @@ void ZDT_CAN_Process(uint32_t now)
     CAN_TxHeaderTypeDef header = {0};
     uint32_t saved;
     if (hcan1.Instance->ESR & CAN_ESR_BOFF) {
+        progress_active = 0U;
         LatchFault();
         /* ABOM must never retransmit the pre-fault nonzero target on recovery. */
         if (flight_mailbox && !aborting) {
@@ -199,8 +224,18 @@ void ZDT_CAN_Process(uint32_t now)
         return;
     }
     if (restart_phase) { (void)Restart(now); return; }
+    WatchTxProgress(now);
     if (flight_mailbox) {
         if (!HAL_CAN_IsTxMessagePending(&hcan1, flight_mailbox)) FinishFlight(now);
+        else if (progress_restart) {
+            /* 先取消旧帧，确认释放后才能停止/启动控制器。 */
+            if (!aborting) {
+                aborting = 1U;
+                (void)HAL_CAN_AbortTxRequest(&hcan1, flight_mailbox);
+            }
+            if ((uint32_t)(now - flight_tick) >= RESTART_MS) (void)Restart(now);
+            return;
+        }
         else if ((uint32_t)(now - flight_tick) >= TX_TIMEOUT_MS) {
             if (!aborting) {
                 stats.tx_timeout++; stats.last_tx_result = 4U; LatchFault();
@@ -211,6 +246,7 @@ void ZDT_CAN_Process(uint32_t now)
             return;
         } else return;
     }
+    if (progress_restart) { (void)Restart(now); return; }
     if (!ZDT_CAN_HardwareReady()) { LatchFault(); (void)Restart(now); return; }
     /* Round robin avoids one absent motor starving the other three stops. */
     for (i = 0U; i < 4U; ++i) {
@@ -259,7 +295,7 @@ uint8_t ZDT_CAN_HardwareReady(void)
 {
     return HAL_CAN_GetState(&hcan1) == HAL_CAN_STATE_LISTENING &&
            !(HAL_CAN_GetError(&hcan1) & BLOCKING_ERRORS) &&
-           !(hcan1.Instance->ESR & CAN_ESR_BOFF) && !restart_phase;
+           !(hcan1.Instance->ESR & CAN_ESR_BOFF) && !restart_phase && !progress_restart;
 }
 uint8_t ZDT_CAN_IsReady(void) { return ZDT_CAN_HardwareReady() && !stats.tx_fault; }
 uint8_t ZDT_CAN_HasFault(void) { return stats.tx_fault; }
@@ -322,5 +358,7 @@ void ZDT_CAN_TestResetFault(void)
     query_head = query_tail = query_count = stop_required = stop_sent = cursor = 0U;
     flight_mailbox = 0U; flight_done = aborting = restart_phase = fault_event = 0U;
     retry_mask = enable_delay_mask = 0U; restart_tick = 0U;
+    progress_active = progress_restart = restart_attempted = 0U;
+    progress_tick = progress_tx_ok = 0U;
 }
 #endif

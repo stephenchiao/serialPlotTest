@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\steph\\STM32CubeIDE\\workspace_1.19.0\\serialPlotTest\\.archify\\architecture-can1-llm-pid-tuner-20260928-211022\\candidate.json",
+    "sha256": "adf15adb2fcef4f54b78af297b3a5d3e3af4eaf8505035b9cf3c841d405d8bdd",
+    "bytes": 31054
+  },
+  "artifact": {
+    "path": "C:\\Users\\steph\\STM32CubeIDE\\workspace_1.19.0\\serialPlotTest\\.archify\\architecture-can1-llm-pid-tuner-20260928-211022\\can1-llm-pid-tuner.html",
+    "sha256": "cd59266d2db2884c6edef3aaffa21b6e4af10e011deab05275808b647b36ce33",
+    "bytes": 781351
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\steph\\STM32CubeIDE\\workspace_1.19.0\\serialPlotTest\\.archify\\architecture-can1-llm-pid-tuner-20260928-211022\\can1-llm-pid-tuner.finalize.json",
+    "summaryReceipt": "C:\\Users\\steph\\STM32CubeIDE\\workspace_1.19.0\\serialPlotTest\\.archify\\architecture-can1-llm-pid-tuner-20260928-211022\\can1-llm-pid-tuner.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\steph\\STM32CubeIDE\\workspace_1.19.0\\serialPlotTest\\.archify\\architecture-can1-llm-pid-tuner-20260928-211022\\can1-llm-pid-tuner.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 7584,
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "routesOverSuggestedBends": 3,
+      "routesOverSuggestedStretch": 2
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [],
+      "detours": [
+        {
+          "relationship": {
+            "id": "round-data",
+            "from": "tuner-py",
+            "to": "llm-client",
+            "label": "轮次数据 / 提示",
+            "collectionIndex": 2,
+            "artifactIndex": 3
+          },
+          "bends": 4,
+          "stretch": 1.627
+        },
+        {
+          "relationship": {
+            "id": "gain-write",
+            "from": "parser",
+            "to": "pid",
+            "label": "PID SET 写入增益",
+            "collectionIndex": 6,
+            "artifactIndex": 7
+          },
+          "bends": 3,
+          "stretch": 1
+        },
+        {
+          "relationship": {
+            "id": "pid-calc",
+            "from": "tuner-fw",
+            "to": "pid",
+            "label": "PID_CalcDt / 复位",
+            "collectionIndex": 7,
+            "artifactIndex": 8
+          },
+          "bends": 4,
+          "stretch": 1.376
+        }
+      ],
+      "truncated": false
+    },
+    "hints": [
+      "tuner-py → llm-client needs 4 bends: move node tuner-py or llm-client so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "parser → pid needs 3 bends: move node parser or pid so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "tuner-fw → pid needs 4 bends: move node tuner-fw or pid so they share a row or column with matching centers, or sit diagonally with a clear corner."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

@@ -26,7 +26,8 @@ typedef struct {
     /* 恢复计数 */
     uint32_t recoveries;        /* 静止条件下解除旧故障的次数 */
     uint32_t auto_recoveries;   /* reserved compatibility counter */
-    uint32_t stall_recoveries;  /* 邮箱撤销卡住/HAL不可用时重启成功次数 */
+    uint32_t stall_recoveries;  /* 发送无进展/撤销卡住/HAL不可用时重启成功次数 */
+    uint32_t no_tx_repairs;     /* 有持续请求但 500 ms 无 TXOK 的修复请求次数 */
 
     /* 控制器寄存器快照 */
     uint32_t esr, tsr;

@@ -1440,13 +1440,15 @@ static uint8_t Host_ProcessOperationalCommand(const char *command)
                (unsigned long)Mecanum_GetPollFailures(),
                Mecanum_GetRequiredMotorMask(),
                (unsigned long)stats.fault_generation, stats.recovery_phase);
-        printf("# CAN ESR=0x%08lX TSR=0x%08lX TEC=%lu REC=%lu BOFF=%u EPVF=%u EWGF=%u\r\n",
+        printf("# CAN TX_WATCH NO_TX_REPAIR=%lu\r\n", (unsigned long)stats.no_tx_repairs);
+        printf("# CAN ESR=0x%08lX TSR=0x%08lX TEC=%lu REC=%lu BOFF=%u EPVF=%u EWGF=%u LEC=%lu\r\n",
                (unsigned long)stats.esr, (unsigned long)stats.tsr,
                (unsigned long)((stats.esr >> 16) & 255U),
                (unsigned long)((stats.esr >> 24) & 255U),
                (unsigned int)!!(stats.esr & CAN_ESR_BOFF),
                (unsigned int)!!(stats.esr & CAN_ESR_EPVF),
-               (unsigned int)!!(stats.esr & CAN_ESR_EWGF));
+               (unsigned int)!!(stats.esr & CAN_ESR_EWGF),
+               (unsigned long)((stats.esr >> 4) & 7U));
         return 1U;
     }
 

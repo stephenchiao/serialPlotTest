@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "12afa71b-9038-4f5f-a158-25cde69c40cf",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\steph\\STM32CubeIDE\\workspace_1.19.0\\serialPlotTest\\.archify\\architecture-can1-llm-pid-tuner-20260928-211022\\candidate.json",
+  "output": "C:\\Users\\steph\\STM32CubeIDE\\workspace_1.19.0\\serialPlotTest\\.archify\\architecture-can1-llm-pid-tuner-20260928-211022\\can1-llm-pid-tuner.html",
+  "specification": {
+    "sha256": "03dff6505433df9302c4840a01174f513ce8c645d2c6673edea9f4034e277327",
+    "bytes": 31054
+  },
+  "artifact": {
+    "sha256": "3536760a157429d74616923c1930bf83abdc8a719f1213cbeb415ba3d3b7dcf5",
+    "bytes": 780820
+  }
+}

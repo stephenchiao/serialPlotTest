@@ -470,16 +470,63 @@ static void test_transport_repair_and_formats(void)
     assert(last_notify_mask == (CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_TX_MAILBOX_EMPTY));
 }
 
+static void test_transport_no_tx_progress(void)
+{
+    ZDT_CAN_Stats_t stats;
+    unsigned i;
+    uint8_t query[2] = {0x35U, 0x6BU};
+    /* 现场模式：每帧超时后撤销成功、FREE=2/3，但持续没有 TXOK。
+     * 跨帧监督必须触发，不能每次换邮箱/重试都重新计时。 */
+    can_reset(20000U); ZDT_Emm_InitAll();
+    assert(!ZDT_Emm_SetSpeedByID(1U, 60.0f)); ZDT_CAN_Process(tick);
+    tick += 50U; ZDT_CAN_Process(tick);
+    assert(!StopAllMotors());
+    for (i = 0U; i < 600U; ++i) ZDT_CAN_Process(++tick);
+    ZDT_CAN_GetStats(&stats);
+    assert(stats.tx_timeout >= 4U && stats.tx_ok == 0U);
+    assert(stats.stall_recoveries >= 1U);
+    assert(!ZDT_CAN_IsReady());
+    for (i = 0U; i < 200U; ++i) {
+        if (pending) tx_complete();
+        ZDT_CAN_Process(++tick);
+    }
+    assert(ZDT_CAN_StopSent(15U) && ZDT_CAN_RecoverWhenIdle(1U));
+    for (i = 1U; i < sent_count; ++i) assert(sent[i].bytes[0] == 0xFEU);
+
+    /* 单次失败查询后空闲，不应因为历史 TXOK 为零而周期重启。 */
+    can_reset(30000U); ZDT_Emm_InitAll();
+    assert(!ZDT_CAN_Send_ExtId(0x100U, query, 2U));
+    for (i = 0U; i < 1200U; ++i) ZDT_CAN_Process(++tick);
+    ZDT_CAN_GetStats(&stats); assert(stats.stall_recoveries == 0U);
+
+    /* 有新 TXOK 的持续流量与长时间空闲后首次发帧不应误触发。 */
+    can_reset(40000U); ZDT_Emm_InitAll();
+    for (i = 0U; i < 200U; ++i) {
+        if (pending) tx_complete();
+        assert(!ZDT_CAN_Send_ExtId(0x100U, query, 2U));
+        tick += 10U; ZDT_CAN_Process(tick);
+    }
+    tx_complete(); ZDT_CAN_Process(++tick);
+    tick += 5000U; ZDT_CAN_Process(tick);
+    assert(!ZDT_CAN_Send_ExtId(0x100U, query, 2U)); ZDT_CAN_Process(++tick);
+    ZDT_CAN_GetStats(&stats); assert(stats.stall_recoveries == 0U);
+
+    can_reset(UINT32_MAX - 200U); ZDT_Emm_InitAll(); assert(!StopAllMotors());
+    for (i = 0U; i < 650U; ++i) ZDT_CAN_Process(++tick);
+    ZDT_CAN_GetStats(&stats); assert(stats.stall_recoveries >= 1U);
+}
+
 int main(void)
 {
     test_pid_dt_and_limits();
     test_command_only_transport();
     test_transport_repair_and_formats();
+    test_transport_no_tx_progress();
     test_stop_confirmation();
     test_uart_dma_ownership_and_priority();
     test_uart_burst_and_errors();
     test_ops_snapshot_and_invalid_frame();
     test_runtime_deadline();
-    puts("control layer: 2 CAN groups and 6 control groups passed");
+    puts("control layer: 3 CAN groups and 6 control groups passed");
     return 0;
 }

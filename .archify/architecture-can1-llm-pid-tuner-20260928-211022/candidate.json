@@ -1,0 +1,643 @@
+{
+    "schema_version":  1,
+    "diagram_type":  "architecture",
+    "meta":  {
+                 "title":  "CAN1 通信与 LLM PID 自动调参运行架构",
+                 "locale":  "zh-CN",
+                 "output":  ".archify/architecture-can1-llm-pid-tuner-20260928-211022/can1-llm-pid-tuner.html",
+                 "quality_profile":  "showcase",
+                 "repository":  {
+                                    "url":  "git@github.com:stephenchiao/serialPlotTest.git",
+                                    "revision":  "4ece3526e65c005c624d0f9958a6d052561e29ca",
+                                    "link_mode":  "local-only"
+                                },
+                 "views":  [
+                               {
+                                   "id":  "tune-loop",
+                                   "label":  "调参闭环",
+                                   "focus":  [
+                                                 "tuner-py",
+                                                 "uart1",
+                                                 "parser",
+                                                 "tuner-fw",
+                                                 "pid",
+                                                 "llm-client"
+                                             ],
+                                   "note":  "LLM 建议增益 → PID SET → 调参轮次 → CSV 遥测回流 PC"
+                               },
+                               {
+                                   "id":  "can1-link",
+                                   "label":  "CAN1 数据链路",
+                                   "focus":  [
+                                                 "tuner-fw",
+                                                 "mecanum",
+                                                 "emm-proto",
+                                                 "can-sched",
+                                                 "can1bus",
+                                                 "motors"
+                                             ],
+                                   "note":  "TX 调度泵出速度帧，RX FIFO0 中断回收电机应答"
+                               }
+                           ]
+             },
+    "components":  [
+                       {
+                           "id":  "llm-api",
+                           "type":  "cloud",
+                           "label":  "LLM 服务",
+                           "sublabel":  "OpenAI 兼容 API",
+                           "pos":  [
+                                       40,
+                                       40
+                                   ],
+                           "size":  [
+                                        180,
+                                        56
+                                    ]
+                       },
+                       {
+                           "id":  "llm-client",
+                           "type":  "backend",
+                           "label":  "llm/client.py",
+                           "sublabel":  "流式 JSON 增益建议",
+                           "pos":  [
+                                       40,
+                                       150
+                                   ],
+                           "size":  [
+                                        180,
+                                        64
+                                    ]
+                       },
+                       {
+                           "id":  "tuner-py",
+                           "type":  "backend",
+                           "label":  "tuner.py 编排",
+                           "sublabel":  "SerialBridge · 轮次管理",
+                           "pos":  [
+                                       40,
+                                       260
+                                   ],
+                           "size":  [
+                                        180,
+                                        64
+                                    ]
+                       },
+                       {
+                           "id":  "sensor-ops",
+                           "type":  "external",
+                           "label":  "OPS-9 定位传感器",
+                           "sublabel":  "室内定位",
+                           "pos":  [
+                                       40,
+                                       420
+                                   ],
+                           "size":  [
+                                        180,
+                                        60
+                                    ]
+                       },
+                       {
+                           "id":  "uart1",
+                           "type":  "messagebus",
+                           "label":  "USART1 主机链路",
+                           "sublabel":  "115200 · ASCII/RPi 双协议",
+                           "pos":  [
+                                       296,
+                                       330
+                                   ],
+                           "size":  [
+                                        170,
+                                        64
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/host_rx_router.c",
+                                               "line":  20,
+                                               "end_line":  32,
+                                               "label":  "HostRx_Feed 字节路由"
+                                           },
+                                           {
+                                               "path":  "Core/Src/host_uart_tx.c",
+                                               "line":  36,
+                                               "end_line":  50,
+                                               "label":  "HostUartTx_Write 行队列"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "parser",
+                           "type":  "backend",
+                           "label":  "命令解析",
+                           "sublabel":  "Host_ProcessCommand",
+                           "pos":  [
+                                       560,
+                                       330
+                                   ],
+                           "size":  [
+                                        170,
+                                        64
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/robot_app.c",
+                                               "line":  2050,
+                                               "end_line":  2075,
+                                               "label":  "命令分发"
+                                           },
+                                           {
+                                               "path":  "Core/Src/robot_app.c",
+                                               "line":  2126,
+                                               "end_line":  2173,
+                                               "label":  "PID SET / TUNE AXIS"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "pid",
+                           "type":  "backend",
+                           "label":  "PID ×3 (X/Y/YAW)",
+                           "sublabel":  "pid_x / pid_y / pid_yaw",
+                           "pos":  [
+                                       829,
+                                       190
+                                   ],
+                           "size":  [
+                                        170,
+                                        60
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/robot_app.c",
+                                               "line":  79,
+                                               "end_line":  81,
+                                               "label":  "PID 实例"
+                                           },
+                                           {
+                                               "path":  "Core/Inc/pid.h",
+                                               "line":  12,
+                                               "end_line":  32,
+                                               "label":  "PID_Controller"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "tuner-fw",
+                           "type":  "backend",
+                           "label":  "LLM_TunerProcess",
+                           "sublabel":  "WAIT→ARMING→RUN · 仅 TUNE 模式",
+                           "pos":  [
+                                       824,
+                                       330
+                                   ],
+                           "size":  [
+                                        180,
+                                        72
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/llm_tuner.c",
+                                               "line":  222,
+                                               "end_line":  429,
+                                               "label":  "20ms 调参步 + 遥测"
+                                           },
+                                           {
+                                               "path":  "Core/Src/robot_app.c",
+                                               "line":  2386,
+                                               "end_line":  2387,
+                                               "label":  "TUNE 模式门控"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "ops9",
+                           "type":  "backend",
+                           "label":  "OPS-9 姿态解析",
+                           "sublabel":  "USART2 中断 · 姿态快照",
+                           "pos":  [
+                                       560,
+                                       510
+                                   ],
+                           "size":  [
+                                        180,
+                                        60
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/ops9.c",
+                                               "line":  37,
+                                               "end_line":  50,
+                                               "label":  "OPS9_GetSnapshot"
+                                           },
+                                           {
+                                               "path":  "Core/Src/ops9.c",
+                                               "line":  77,
+                                               "end_line":  120,
+                                               "label":  "帧头帧尾解析"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "mecanum",
+                           "type":  "backend",
+                           "label":  "麦克纳姆运动学",
+                           "sublabel":  "Mecanum_Kinematics",
+                           "pos":  [
+                                       1003,
+                                       510
+                                   ],
+                           "size":  [
+                                        166,
+                                        64
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/mecanum_chassis.c",
+                                               "line":  61,
+                                               "end_line":  68,
+                                               "label":  "逆运动学"
+                                           },
+                                           {
+                                               "path":  "Core/Src/mecanum_chassis.c",
+                                               "line":  82,
+                                               "end_line":  121,
+                                               "label":  "SetAllMotorsSpeed"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "emm-proto",
+                           "type":  "backend",
+                           "label":  "ZDT Emm 协议",
+                           "sublabel":  "0xF6 速度 / 0x35 查询",
+                           "pos":  [
+                                       1003,
+                                       660
+                                   ],
+                           "size":  [
+                                        166,
+                                        64
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/zdtEmm.c",
+                                               "line":  78,
+                                               "end_line":  116,
+                                               "label":  "SetSpeedByID 0xF6"
+                                           },
+                                           {
+                                               "path":  "Core/Src/zdtEmm.c",
+                                               "line":  157,
+                                               "end_line":  195,
+                                               "label":  "RX 应答解析"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "can-sched",
+                           "type":  "backend",
+                           "label":  "CAN1 调度器",
+                           "sublabel":  "单在途帧 · 故障锁存",
+                           "pos":  [
+                                       1003,
+                                       810
+                                   ],
+                           "size":  [
+                                        166,
+                                        64
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/zdtCan.c",
+                                               "line":  186,
+                                               "end_line":  257,
+                                               "label":  "ZDT_CAN_Process TX 泵"
+                                           },
+                                           {
+                                               "path":  "Core/Src/zdtCan.c",
+                                               "line":  296,
+                                               "end_line":  307,
+                                               "label":  "RX FIFO0 处理"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "can1bus",
+                           "type":  "messagebus",
+                           "label":  "CAN1 总线",
+                           "sublabel":  "500 kbit/s · 扩展帧",
+                           "pos":  [
+                                       1003,
+                                       960
+                                   ],
+                           "size":  [
+                                        166,
+                                        60
+                                    ],
+                           "sources":  [
+                                           {
+                                               "path":  "Core/Src/can.c",
+                                               "line":  31,
+                                               "end_line":  62,
+                                               "label":  "MX_CAN1_Init 500k"
+                                           }
+                                       ]
+                       },
+                       {
+                           "id":  "motors",
+                           "type":  "external",
+                           "label":  "4× Emm42 驱动器",
+                           "sublabel":  "ZDT 步进电机",
+                           "pos":  [
+                                       1003,
+                                       1110
+                                   ],
+                           "size":  [
+                                        166,
+                                        64
+                                    ]
+                       }
+                   ],
+    "boundaries":  [
+                       {
+                           "kind":  "region",
+                           "label":  "PC · llm-pid-tuner (Python)",
+                           "wraps":  [
+                                         "llm-client",
+                                         "tuner-py"
+                                     ]
+                       },
+                       {
+                           "kind":  "region",
+                           "label":  "STM32F407VET6 固件 · 裸机 1ms 主循环",
+                           "wraps":  [
+                                         "uart1",
+                                         "parser",
+                                         "pid",
+                                         "tuner-fw",
+                                         "mecanum",
+                                         "ops9",
+                                         "emm-proto",
+                                         "can-sched"
+                                     ]
+                       }
+                   ],
+    "connections":  [
+                        {
+                            "id":  "cmd-down",
+                            "from":  "tuner-py",
+                            "to":  "uart1",
+                            "label":  "ASCII 命令",
+                            "variant":  "emphasis",
+                            "fromSide":  "right",
+                            "toSide":  "top"
+                        },
+                        {
+                            "id":  "telem-up",
+                            "from":  "uart1",
+                            "to":  "tuner-py",
+                            "label":  "CSV 遥测 / # 应答",
+                            "variant":  "dashed",
+                            "fromSide":  "left",
+                            "toSide":  "bottom"
+                        },
+                        {
+                            "id":  "round-data",
+                            "from":  "tuner-py",
+                            "to":  "llm-client",
+                            "label":  "轮次数据 / 提示",
+                            "fromSide":  "top",
+                            "toSide":  "bottom"
+                        },
+                        {
+                            "id":  "llm-call",
+                            "from":  "llm-client",
+                            "to":  "llm-api",
+                            "label":  "OpenAI 兼容调用",
+                            "fromSide":  "top",
+                            "toSide":  "bottom"
+                        },
+                        {
+                            "id":  "ascii-line",
+                            "from":  "uart1",
+                            "to":  "parser",
+                            "label":  "ASCII 行"
+                        },
+                        {
+                            "id":  "start-round",
+                            "from":  "parser",
+                            "to":  "tuner-fw",
+                            "label":  "启动轮次"
+                        },
+                        {
+                            "id":  "gain-write",
+                            "from":  "parser",
+                            "to":  "pid",
+                            "label":  "PID SET 写入增益",
+                            "fromSide":  "top",
+                            "toSide":  "left"
+                        },
+                        {
+                            "id":  "pid-calc",
+                            "from":  "tuner-fw",
+                            "to":  "pid",
+                            "label":  "PID_CalcDt / 复位",
+                            "fromSide":  "top",
+                            "toSide":  "bottom"
+                        },
+                        {
+                            "id":  "wheel-cmd",
+                            "from":  "tuner-fw",
+                            "to":  "mecanum",
+                            "label":  "轮速指令",
+                            "fromSide":  "bottom",
+                            "toSide":  "top",
+                            "via":  [
+                                        [
+                                            914,
+                                            436
+                                        ],
+                                        [
+                                            1086,
+                                            436
+                                        ]
+                                    ],
+                            "labelAt":  [
+                                            994,
+                                            436
+                                        ]
+                        },
+                        {
+                            "id":  "pose-in",
+                            "from":  "ops9",
+                            "to":  "tuner-fw",
+                            "label":  "姿态快照",
+                            "fromSide":  "top",
+                            "toSide":  "bottom",
+                            "via":  [
+                                        [
+                                            650,
+                                            468
+                                        ],
+                                        [
+                                            914,
+                                            468
+                                        ]
+                                    ],
+                            "labelAt":  [
+                                            780,
+                                            468
+                                        ]
+                        },
+                        {
+                            "id":  "usart2-frame",
+                            "from":  "sensor-ops",
+                            "to":  "ops9",
+                            "label":  "USART2 帧",
+                            "fromSide":  "right",
+                            "toSide":  "left",
+                            "labelAt":  [
+                                            305,
+                                            450
+                                        ]
+                        },
+                        {
+                            "id":  "speed-cmd",
+                            "from":  "mecanum",
+                            "to":  "emm-proto",
+                            "label":  "0xF6 指令",
+                            "fromSide":  "bottom",
+                            "toSide":  "top",
+                            "labelAt":  [
+                                            1029,
+                                            617
+                                        ]
+                        },
+                        {
+                            "id":  "speed-fb",
+                            "from":  "emm-proto",
+                            "to":  "mecanum",
+                            "label":  "0x35 反馈",
+                            "variant":  "dashed",
+                            "fromSide":  "top",
+                            "toSide":  "bottom",
+                            "labelAt":  [
+                                            1139,
+                                            617
+                                        ]
+                        },
+                        {
+                            "id":  "enqueue",
+                            "from":  "emm-proto",
+                            "to":  "can-sched",
+                            "label":  "Send_ExtId 入队",
+                            "fromSide":  "bottom",
+                            "toSide":  "top",
+                            "labelAt":  [
+                                            1031,
+                                            767
+                                        ]
+                        },
+                        {
+                            "id":  "rx-parse",
+                            "from":  "can-sched",
+                            "to":  "emm-proto",
+                            "label":  "RX 回调解析",
+                            "variant":  "dashed",
+                            "fromSide":  "top",
+                            "toSide":  "bottom",
+                            "labelAt":  [
+                                            1139,
+                                            792
+                                        ]
+                        },
+                        {
+                            "id":  "tx-mailbox",
+                            "from":  "can-sched",
+                            "to":  "can1bus",
+                            "label":  "TX 邮箱",
+                            "fromSide":  "bottom",
+                            "toSide":  "top",
+                            "labelAt":  [
+                                            1033,
+                                            917
+                                        ]
+                        },
+                        {
+                            "id":  "rx-fifo",
+                            "from":  "can1bus",
+                            "to":  "can-sched",
+                            "label":  "RX FIFO0 中断",
+                            "variant":  "dashed",
+                            "fromSide":  "top",
+                            "toSide":  "bottom",
+                            "labelAt":  [
+                                            1139,
+                                            917
+                                        ]
+                        },
+                        {
+                            "id":  "bus-frame",
+                            "from":  "can1bus",
+                            "to":  "motors",
+                            "label":  "0xF6/0xF3 帧",
+                            "fromSide":  "bottom",
+                            "toSide":  "top",
+                            "labelAt":  [
+                                            1033,
+                                            1067
+                                        ]
+                        },
+                        {
+                            "id":  "motor-ack",
+                            "from":  "motors",
+                            "to":  "can1bus",
+                            "label":  "0x35/0x3A 应答",
+                            "variant":  "dashed",
+                            "fromSide":  "top",
+                            "toSide":  "bottom",
+                            "labelAt":  [
+                                            1141,
+                                            1067
+                                        ]
+                        }
+                    ],
+    "cards":  [
+                  {
+                      "dot":  "cyan",
+                      "title":  "主机命令 (USART1)",
+                      "items":  [
+                                    "MODE TUNE / TUNE AXIS 进入调参，仅 TUNE 模式下调参步生效",
+                                    "PID SET / SET P:.. I:.. D:.. 写入增益并启动新一轮",
+                                    "PID STATUS ALL 读回增益，STOP 紧急停止"
+                                ]
+                  },
+                  {
+                      "dot":  "amber",
+                      "title":  "CAN1 调度 (zdtCan)",
+                      "items":  [
+                                    "单在途帧 + 优先级：停止 \u003e 使能 \u003e 速度 \u003e 查询",
+                                    "扩展帧 ExtId = (电机地址\u003c\u003c8) | 包序号，500 kbit/s",
+                                    "故障锁存后只放行停止帧，总线空闲后自动恢复"
+                                ]
+                  },
+                  {
+                      "dot":  "rose",
+                      "title":  "安全与保护",
+                      "items":  [
+                                    "越界 / 超时 / 方向错误 → LLM_TunerStopRound 结束轮次",
+                                    "PC 端冗余急停：tuner.py 检测异常后发送 STOP",
+                                    "增益硬上限 LLM_TUNE_KP/KI/KD_MAX 双端校验"
+                                ]
+                  },
+                  {
+                      "dot":  "slate",
+                      "title":  "时序",
+                      "items":  [
+                                    "无 RTOS：RobotApp_Process ~1ms 主循环轮询",
+                                    "CAN 收发中断驱动，TX 由主循环泵调度",
+                                    "调参控制步 20ms 基准，CSV 遥测按固定周期输出"
+                                ]
+                  }
+              ]
+}
